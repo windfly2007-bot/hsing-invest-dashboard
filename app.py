@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V6.4a", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V6.4a-fixed", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -123,6 +123,27 @@ table, th, td {
 }
 
 .section-note { color:#94a3b8; font-size:16px; }
+
+/* V6.4a 顯示修正版 */
+[data-testid="stCaptionContainer"] {
+    border: none !important;
+    text-decoration: none !important;
+}
+
+h2, h3 {
+    margin-top: 1.2rem !important;
+    margin-bottom: 0.9rem !important;
+}
+
+[data-testid="stDataFrame"] {
+    margin-top: 0.6rem !important;
+}
+
+hr {
+    margin-top: 1.8rem !important;
+    margin-bottom: 1.8rem !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1455,7 +1476,23 @@ st.divider()
 
 st.divider()
 st.subheader("❤️ 持股健康度評分")
-st.caption("健康度：🟢90以上優秀｜🔵75~89良好｜🟡60~74普通｜🔴60以下偏弱")
+st.markdown("""
+<div style="
+    background:#f8fafc;
+    border-left:6px solid #60a5fa;
+    padding:12px 16px;
+    border-radius:10px;
+    margin:8px 0 18px 0;
+    font-size:20px;
+    line-height:1.6;
+">
+<b>健康度說明：</b>
+🟢 90以上 優秀　
+🔵 75~89 良好　
+🟡 60~74 普通　
+🔴 60以下 偏弱
+</div>
+""", unsafe_allow_html=True)
 
 health_rows = []
 for stock_name, ticker in stock_list.items():
