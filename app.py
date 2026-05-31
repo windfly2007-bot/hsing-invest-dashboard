@@ -1799,56 +1799,159 @@ with tab_chart:
     st.subheader("📈 個股K線分析 V9.0 Professional Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
-    period = st.selectbox("期間", ["1mo","3mo","6mo","1y","3y"], index=3)
+    period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
 
     df = get_data(stock_list[selected_stock], period)
 
-    if df.empty or len(df) < 30:
-        st.warning("資料不足")
+    if df.empty or len(df) < 15:
+        st.warning("資料不足，請改選較長期間。")
     else:
         df = calculate_kd(df)
         df = calculate_macd(df)
 
-        df["MA20"]=df["Close"].rolling(20).mean()
-        df["MA60"]=df["Close"].rolling(60).mean()
-        df["MA120"]=df["Close"].rolling(120).mean()
-        df["BB_MID"]=df["Close"].rolling(20).mean()
-        std=df["Close"].rolling(20).std()
-        df["BB_UP"]=df["BB_MID"]+2*std
-        df["BB_LOW"]=df["BB_MID"]-2*std
+        df["MA5"] = df["Close"].rolling(5).mean()
+        df["MA10"] = df["Close"].rolling(10).mean()
+        df["MA20"] = df["Close"].rolling(20).mean()
 
-        chip_daily=get_chip_daily_series(selected_stock)
+        support, resistance = calc_support_resistance(df)
+        current_price = float(df.iloc[-1]["Close"])
+        latest_k = float(df["K"].dropna().iloc[-1]) if df["K"].notna().sum() else 50
+        latest_d = float(df["D"].dropna().iloc[-1]) if df["D"].notna().sum() else 50
+        latest_macd = float(df["MACD"].dropna().iloc[-1]) if df["MACD"].notna().sum() else 0
+        latest_signal = float(df["Signal"].dropna().iloc[-1]) if df["Signal"].notna().sum() else 0
+        latest_hist = float(df["Hist"].dropna().iloc[-1]) if df["Hist"].notna().sum() else 0
 
-        fig = make_subplots(rows=6,cols=1,shared_xaxes=True,
-                            vertical_spacing=0.02,
-                            row_heights=[0.42,0.12,0.12,0.12,0.11,0.11])
+        kd_text = "🟢 KD偏多" if latest_k > latest_d else "🔴 KD偏弱"
+        if latest_k >= 80:
+            kd_text += "｜偏熱"
+        elif latest_k <= 20:
+            kd_text += "｜低檔"
 
-        fig.add_trace(go.Candlestick(x=df.index,open=df["Open"],high=df["High"],low=df["Low"],close=df["Close"],name="K線"),row=1,col=1)
+        macd_text = "🟢 MACD紅柱偏多" if latest_hist >= 0 else "🔴 MACD綠柱偏弱"
+        if latest_macd > latest_signal and latest_hist >= 0:
+            macd_text = "🟢 MACD偏多"
+        elif latest_macd < latest_signal and latest_hist < 0:
+            macd_text = "🔴 MACD偏弱"
 
-        for ma in ["MA20","MA60","MA120"]:
-            fig.add_trace(go.Scatter(x=df.index,y=df[ma],name=ma),row=1,col=1)
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("現價", f"{current_price:.2f}")
+        c2.metric("近期支撐", f"{support:.2f}")
+        c3.metric("近期壓力", f"{resistance:.2f}")
+        c4.metric("KD", f"K {latest_k:.1f} / D {latest_d:.1f}", kd_text)
+        c5.metric("MACD", f"{latest_hist:.2f}", macd_text)
 
-        fig.add_trace(go.Scatter(x=df.index,y=df["BB_UP"],name="BB上軌"),row=1,col=1)
-        fig.add_trace(go.Scatter(x=df.index,y=df["BB_LOW"],name="BB下軌"),row=1,col=1)
+        chip_daily = get_chip_daily_series(selected_stock)
 
-        fig.add_trace(go.Bar(x=df.index,y=df["Volume"]/1000,name="成交量"),row=2,col=1)
+        fig = make_subplots(
+            rows=6,
+            cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.025,
+            row_heights=[0.44, 0.12, 0.12, 0.12, 0.10, 0.10],
+            subplot_titles=("K線 / MA5 / MA10 / MA20", "成交量", "外資買賣超", "投信買賣超", "KD", "MACD"),
+        )
+
+        fig.add_trace(
+            go.Candlestick(
+                x=df.index,
+                open=df["Open"],
+                high=df["High"],
+                low=df["Low"],
+                close=df["Close"],
+                increasing_line_color="red",
+                decreasing_line_color="green",
+                increasing_fillcolor="rgba(255,0,0,0.25)",
+                decreasing_fillcolor="rgba(0,170,80,0.25)",
+                name="K線",
+            ),
+            row=1,
+            col=1,
+        )
+
+        ma_styles = {
+            "MA5": dict(color="#f59e0b", width=2),
+            "MA10": dict(color="#38bdf8", width=2),
+            "MA20": dict(color="#a855f7", width=2),
+        }
+        for ma, style in ma_styles.items():
+            fig.add_trace(
+                go.Scatter(x=df.index, y=df[ma], name=ma, line=style),
+                row=1,
+                col=1,
+            )
+
+        fig.add_hline(
+            y=resistance,
+            line_dash="dash",
+            line_color="red",
+            annotation_text=f"壓力 {resistance:.2f}",
+            annotation_position="top left",
+            row=1,
+            col=1,
+        )
+        fig.add_hline(
+            y=support,
+            line_dash="dash",
+            line_color="green",
+            annotation_text=f"支撐 {support:.2f}",
+            annotation_position="bottom left",
+            row=1,
+            col=1,
+        )
+
+        volume_colors = ["red" if c >= o else "green" for c, o in zip(df["Close"], df["Open"])]
+        fig.add_trace(
+            go.Bar(x=df.index, y=df["Volume"] / 1000, name="成交量", marker_color=volume_colors),
+            row=2,
+            col=1,
+        )
 
         if not chip_daily.empty:
-            fig.add_trace(go.Bar(x=chip_daily.index,y=chip_daily["Foreign"],name="外資"),row=3,col=1)
-            fig.add_trace(go.Bar(x=chip_daily.index,y=chip_daily["Trust"],name="投信"),row=4,col=1)
+            foreign_colors = ["red" if v >= 0 else "green" for v in chip_daily["Foreign"]]
+            trust_colors = ["red" if v >= 0 else "green" for v in chip_daily["Trust"]]
+            fig.add_trace(
+                go.Bar(x=chip_daily.index, y=chip_daily["Foreign"], name="外資", marker_color=foreign_colors),
+                row=3,
+                col=1,
+            )
+            fig.add_trace(
+                go.Bar(x=chip_daily.index, y=chip_daily["Trust"], name="投信", marker_color=trust_colors),
+                row=4,
+                col=1,
+            )
+        else:
+            st.info("目前抓不到法人日資料，外資 / 投信副圖會暫時空白。")
 
-        fig.add_trace(go.Scatter(x=df.index,y=df["K"],name="K"),row=5,col=1)
-        fig.add_trace(go.Scatter(x=df.index,y=df["D"],name="D"),row=5,col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df["K"], name="K", line=dict(color="#f472b6", width=2)), row=5, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df["D"], name="D", line=dict(color="#60a5fa", width=2)), row=5, col=1)
+        fig.add_hline(y=80, line_dash="dot", line_color="red", row=5, col=1)
+        fig.add_hline(y=20, line_dash="dot", line_color="green", row=5, col=1)
 
-        fig.add_trace(go.Bar(x=df.index,y=df["Hist"],name="MACD Hist"),row=6,col=1)
-        fig.add_trace(go.Scatter(x=df.index,y=df["MACD"],name="MACD"),row=6,col=1)
-        fig.add_trace(go.Scatter(x=df.index,y=df["Signal"],name="Signal"),row=6,col=1)
+        macd_colors = ["red" if v >= 0 else "green" for v in df["Hist"].fillna(0)]
+        fig.add_trace(go.Bar(x=df.index, y=df["Hist"], name="MACD柱", marker_color=macd_colors), row=6, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df["MACD"], name="MACD", line=dict(color="#ef4444", width=2)), row=6, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df["Signal"], name="Signal", line=dict(color="#60a5fa", width=2)), row=6, col=1)
 
-        visible=min(120,len(df))
-        fig.update_xaxes(range=[df.index[-visible],df.index[-1]])
-        fig.update_layout(height=1400,xaxis_rangeslider_visible=False)
+        visible = min(120, len(df))
+        fig.update_xaxes(range=[df.index[-visible], df.index[-1]])
+        fig.update_layout(
+            height=1450,
+            template="plotly_white",
+            xaxis_rangeslider_visible=False,
+            hovermode="x unified",
+            legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.01),
+            margin=dict(l=40, r=150, t=70, b=40),
+            font=dict(size=16),
+        )
+        fig.update_yaxes(title_text="股價", row=1, col=1)
+        fig.update_yaxes(title_text="張", row=2, col=1)
+        fig.update_yaxes(title_text="張", row=3, col=1)
+        fig.update_yaxes(title_text="張", row=4, col=1)
+        fig.update_yaxes(title_text="KD", row=5, col=1, range=[0, 100])
+        fig.update_yaxes(title_text="MACD", row=6, col=1)
 
-        st.plotly_chart(fig,use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
+
 with tab_line:
     st.subheader("⚙️ LINE Messaging API 設定說明")
     st.markdown("""
