@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V6.2", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V6.3", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -677,6 +677,179 @@ def steel_stock_score():
         return score, "🟡 中性"
     return score, "🔴 偏弱"
 
+
+def buy_point_progress(stock_name, current_price):
+    add_price = long_term_rules[stock_name]["add"]
+    strong_add = long_term_rules[stock_name]["strong_add"]
+
+    if current_price <= strong_add:
+        progress = 100
+        text = "🟢 強力加碼區"
+    elif current_price <= add_price:
+        progress = 95
+        text = "🟢 已進入加碼區"
+    else:
+        gap_pct = (current_price - add_price) / current_price * 100
+        progress = max(0, min(90, int(100 - gap_pct * 10)))
+
+        if gap_pct <= 3:
+            text = "🟡 非常接近買點"
+        elif gap_pct <= 8:
+            text = "🟠 等待拉回"
+        else:
+            text = "🔴 離買點較遠"
+
+    return progress, text
+
+
+def leader_index_score():
+    score = 50
+    weights = {
+        "NVDA": 18,
+        "TSM": 18,
+        "^SOX": 16,
+        "^IXIC": 10,
+        "^VIX": -10,
+        "^TNX": -8,
+        "DX-Y.NYB": -6,
+    }
+
+    for ticker, weight in weights.items():
+        _, pct = get_latest_pct(ticker)
+        if pct is None:
+            continue
+
+        if weight > 0:
+            score += weight if pct > 0 else -weight
+        else:
+            score += abs(weight) if pct < 0 else -abs(weight)
+
+    score = int(max(0, min(100, score)))
+
+    if score >= 75:
+        msg = "🟢 AI領先指數偏多"
+    elif score >= 55:
+        msg = "🔵 AI領先指數中性偏多"
+    elif score >= 40:
+        msg = "🟡 AI領先指數中性偏弱"
+    else:
+        msg = "🔴 AI領先指數偏弱"
+
+    return score, msg
+
+
+def steel_leader_index_score():
+    score = 50
+    weights = {
+        "HRC=F": 18,
+        "ALI=F": 14,
+        "HG=F": 10,
+        "TIO=F": 6,
+        "DX-Y.NYB": -8,
+        "^TNX": -6,
+    }
+
+    for ticker, weight in weights.items():
+        _, pct = get_latest_pct(ticker)
+        if pct is None:
+            continue
+
+        if weight > 0:
+            score += weight if pct > 0 else -weight
+        else:
+            score += abs(weight) if pct < 0 else -abs(weight)
+
+    score = int(max(0, min(100, score)))
+
+    if score >= 75:
+        msg = "🟢 鋼鐵領先指數偏多"
+    elif score >= 55:
+        msg = "🔵 鋼鐵領先指數中性偏多"
+    elif score >= 40:
+        msg = "🟡 鋼鐵領先指數中性偏弱"
+    else:
+        msg = "🔴 鋼鐵領先指數偏弱"
+
+    return score, msg
+
+
+def weekly_strategy(stock_name, current_price, health_score, chip_score, risk_text):
+    progress, buy_text = buy_point_progress(stock_name, current_price)
+    stock_type = long_term_rules[stock_name]["type"]
+
+    if "過熱" in risk_text:
+        return "🔴 停止加碼", "高檔風險偏高，避免追價"
+
+    if current_price <= long_term_rules[stock_name]["add"]:
+        return "🟢 分批加碼", "價格進入加碼區"
+
+    if progress >= 80 and health_score >= 65:
+        return "🟢 接近買點", "可分批觀察，不一次買滿"
+
+    if health_score >= 80 and chip_score >= 0:
+        return "🔵 續抱", "趨勢與籌碼仍可接受"
+
+    if health_score >= 60:
+        return "🟡 觀察", "等待更接近加碼價"
+
+    return "🔴 保守", "健康度偏弱，暫緩加碼"
+
+
+def institutional_strength_rank():
+    rows = []
+    for stock_name in stock_list:
+        row = summarize_institutional(stock_name)
+        try:
+            foreign20 = float(str(row["外資20日"]).replace(",", "").replace(" 張", ""))
+        except Exception:
+            foreign20 = 0
+        try:
+            trust20 = float(str(row["投信20日"]).replace(",", "").replace(" 張", ""))
+        except Exception:
+            trust20 = 0
+
+        strength = foreign20 + trust20
+
+        rows.append({
+            "股票": stock_name,
+            "外資20日": row["外資20日"],
+            "投信20日": row["投信20日"],
+            "法人強度": round(strength),
+        })
+
+    return pd.DataFrame(rows).sort_values("法人強度", ascending=False)
+
+
+def stock_diagnosis(stock_name, ticker, ai_score, steel_score, chip_score_map):
+    df = get_data(ticker, "1y")
+    if df.empty or len(df) < 120:
+        return None
+
+    current = float(df.iloc[-1]["Close"])
+    health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+    distance, risk_text = risk_distance_from_ma(df)
+    progress, buy_text = buy_point_progress(stock_name, current)
+
+    ma20 = df["Close"].rolling(20).mean().iloc[-1]
+    ma60 = df["Close"].rolling(60).mean().iloc[-1]
+
+    trend = "🟢 多頭" if current > ma20 and current > ma60 else "🟡 震盪" if current > ma60 else "🔴 偏弱"
+    industry = ai_temperature_comment(ai_score) if long_term_rules[stock_name]["type"] == "AI" else steel_temperature_comment(steel_score)
+    strategy, reason = weekly_strategy(stock_name, current, health, chip_score_map.get(stock_name, 0), risk_text)
+
+    return {
+        "股票": stock_name,
+        "現價": round(current, 2),
+        "健康度": health,
+        "趨勢": trend,
+        "買點狀態": buy_text,
+        "高檔風險": risk_text,
+        "產業環境": industry,
+        "操作建議": strategy,
+        "原因": reason,
+    }
+
+
 def allocation_suggestion(cash, ai_score, steel_score):
     weights = {
         "台積電": 0.45,
@@ -717,13 +890,16 @@ def allocation_suggestion(cash, ai_score, steel_score):
 # 主畫面
 # =====================================================
 
-st.title("🚀 Hsing 投資儀表板 V6.2")
+st.title("🚀 Hsing 投資儀表板 V6.3")
 
 st.info("""
-V6.2新增功能：
-✅ 買點雷達
-✅ ADR開盤預估
-✅ 持股健康度
+V6.3 Ultimate 新增功能：
+✅ 本週策略中心
+✅ 買點雷達進度條
+✅ 法人強度排行榜
+✅ AI / 鋼鐵領先指數
+✅ 個股診斷中心
+✅ 持股健康度2.0
 
 V6.0 新增功能：
 ✅ 外資/投信連買天數
@@ -778,6 +954,63 @@ alerts = generate_alerts(ai_score, steel_score, chip_score_map)
 
 for alert in alerts:
     st.markdown(f'<div class="alert-card">{alert}</div>', unsafe_allow_html=True)
+
+st.divider()
+
+
+st.subheader("🧭 V6.3 本週策略中心")
+
+strategy_rows = []
+for stock_name, ticker in stock_list.items():
+    df_s = get_data(ticker, "1y")
+    if df_s.empty or len(df_s) < 120:
+        continue
+
+    current_s = float(df_s.iloc[-1]["Close"])
+    health_s = score_stock(stock_name, df_s, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+    _, risk_s = risk_distance_from_ma(df_s)
+    strategy_s, reason_s = weekly_strategy(
+        stock_name,
+        current_s,
+        health_s,
+        chip_score_map.get(stock_name, 0),
+        risk_s
+    )
+
+    progress_s, buy_text_s = buy_point_progress(stock_name, current_s)
+
+    strategy_rows.append({
+        "股票": stock_name,
+        "本週建議": strategy_s,
+        "理由": reason_s,
+        "買點狀態": buy_text_s,
+        "健康度": health_s,
+    })
+
+if strategy_rows:
+    st.dataframe(pd.DataFrame(strategy_rows), use_container_width=True, hide_index=True)
+
+st.subheader("📊 買點雷達")
+for stock_name, ticker in stock_list.items():
+    df_b = get_data(ticker, "1y")
+    if df_b.empty:
+        continue
+
+    current_b = float(df_b.iloc[-1]["Close"])
+    progress_b, text_b = buy_point_progress(stock_name, current_b)
+    st.write(f"**{stock_name}**｜現價 {current_b:.2f}｜加碼價 {long_term_rules[stock_name]['add']}｜{text_b}")
+    st.progress(progress_b / 100)
+
+st.subheader("🔥 AI / 鋼鐵領先指數")
+leader_ai, leader_ai_msg = leader_index_score()
+leader_steel, leader_steel_msg = steel_leader_index_score()
+c1, c2 = st.columns(2)
+c1.metric("AI領先指數", f"{leader_ai} 分", leader_ai_msg)
+c2.metric("鋼鐵領先指數", f"{leader_steel} 分", leader_steel_msg)
+
+st.subheader("🏆 法人強度排行榜")
+rank_df = institutional_strength_rank()
+st.dataframe(rank_df, use_container_width=True, hide_index=True)
 
 st.divider()
 
@@ -917,7 +1150,7 @@ for name, info in news_targets.items():
 st.divider()
 
 
-st.subheader("🎯 V6.2 個人加碼地圖")
+st.subheader("🎯 V6.3 個人加碼地圖")
 
 map_rows = []
 for stock_name, ticker in stock_list.items():
@@ -1074,6 +1307,32 @@ if not portfolio_df.empty:
     st.markdown(portfolio_df.to_html(escape=False, index=False), unsafe_allow_html=True)
 
 st.divider()
+
+
+st.subheader("🩺 V6.3 個股診斷中心")
+
+diag_stock = st.selectbox("選擇要診斷的股票", list(stock_list.keys()), key="diag_stock")
+diag = stock_diagnosis(diag_stock, stock_list[diag_stock], ai_score, steel_score, chip_score_map)
+
+if diag:
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("現價", diag["現價"])
+    d2.metric("健康度", diag["健康度"])
+    d3.metric("趨勢", diag["趨勢"])
+    d4.metric("操作建議", diag["操作建議"])
+
+    st.markdown(f"""
+<div class="alert-card">
+<b>{diag['股票']} 診斷結果</b><br>
+買點狀態：{diag['買點狀態']}<br>
+高檔風險：{diag['高檔風險']}<br>
+產業環境：{diag['產業環境']}<br>
+原因：{diag['原因']}
+</div>
+""", unsafe_allow_html=True)
+
+st.divider()
+
 
 # 單檔股票分析
 st.subheader("📊 單檔股票分析")
