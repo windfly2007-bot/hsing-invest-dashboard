@@ -7,6 +7,8 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import xml.etree.ElementTree as ET
+from urllib.parse import quote
 
 st.set_page_config(
     page_title="Hsing 投資儀表板 V5.0",
@@ -325,18 +327,24 @@ def summarize_institutional(stock_name):
             "chip_score": 0,
         }
 
+    # FinMind 的法人名稱可能是中文，也可能是英文代碼。
+    # 常見 name 包含：Foreign_Investor、Investment_Trust、Dealer_self、Dealer_Hedging
     recent_dates = sorted(df["date"].unique())[-5:]
-    recent = df[df["date"].isin(recent_dates)]
+    recent = df[df["date"].isin(recent_dates)].copy()
 
-    def net_by_name(keyword):
-        sub = recent[recent["name"].str.contains(keyword, na=False)]
+    def net_by_keywords(keywords):
+        mask = pd.Series(False, index=recent.index)
+        for keyword in keywords:
+            mask = mask | recent["name"].astype(str).str.contains(keyword, case=False, na=False)
+        sub = recent[mask]
         if sub.empty:
             return 0
+        # FinMind 單位通常為股，除以 1000 轉為張
         return sub["net"].sum() / 1000
 
-    foreign = net_by_name("外資")
-    investment = net_by_name("投信")
-    dealer = net_by_name("自營商")
+    foreign = net_by_keywords(["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"])
+    investment = net_by_keywords(["投信", "Investment", "Investment_Trust"])
+    dealer = net_by_keywords(["自營商", "Dealer", "Dealer_self", "Dealer_Hedging"])
 
     chip_score = 0
     chip_score += 1 if foreign > 0 else -1
@@ -362,18 +370,71 @@ def summarize_institutional(stock_name):
 
 @st.cache_data(ttl=3600)
 def get_yahoo_news(ticker, limit=3):
+    # 先試 yfinance；若新版 Yahoo API 沒回資料，再改用 RSS 備援。
+    rows = []
+
     try:
         news = yf.Ticker(ticker).news
-        rows = []
         for item in news[:limit]:
-            rows.append({
-                "標題": item.get("title", ""),
-                "來源": item.get("publisher", ""),
-                "連結": item.get("link", ""),
-            })
-        return rows
+            title = item.get("title", "")
+            publisher = item.get("publisher", "")
+            link = item.get("link", "")
+            if title:
+                rows.append({
+                    "標題": title,
+                    "來源": publisher if publisher else "Yahoo Finance",
+                    "連結": link,
+                })
     except Exception:
-        return []
+        pass
+
+    if rows:
+        return rows[:limit]
+
+    # RSS 備援：Yahoo Finance RSS
+    try:
+        rss_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={quote(ticker)}&region=US&lang=en-US"
+        response = requests.get(rss_url, timeout=10)
+        root = ET.fromstring(response.content)
+
+        for item in root.findall(".//item")[:limit]:
+            title = item.findtext("title") or ""
+            link = item.findtext("link") or ""
+            source = item.findtext("source") or "Yahoo Finance RSS"
+            if title:
+                rows.append({
+                    "標題": title,
+                    "來源": source,
+                    "連結": link,
+                })
+    except Exception:
+        pass
+
+    return rows[:limit]
+
+@st.cache_data(ttl=3600)
+def get_google_news(keyword, limit=3):
+    rows = []
+    try:
+        rss_url = f"https://news.google.com/rss/search?q={quote(keyword)}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+        response = requests.get(rss_url, timeout=10)
+        root = ET.fromstring(response.content)
+
+        for item in root.findall(".//item")[:limit]:
+            title = item.findtext("title") or ""
+            link = item.findtext("link") or ""
+            source_node = item.find("source")
+            source = source_node.text if source_node is not None else "Google News"
+            if title:
+                rows.append({
+                    "標題": title,
+                    "來源": source,
+                    "連結": link,
+                })
+    except Exception:
+        pass
+
+    return rows[:limit]
 
 
 def news_sentiment(title):
@@ -606,17 +667,27 @@ st.divider()
 st.subheader("📰 今日個股新聞摘要")
 
 news_targets = {
-    "台積電 ADR": "TSM",
-    "輝達": "NVDA",
-    "廣達": "2382.TW",
-    "鴻海": "2317.TW",
-    "中鋼": "2002.TW",
-    "大成鋼": "2027.TW",
+    "台積電 ADR": {"ticker": "TSM", "keyword": "台積電 TSMC"},
+    "輝達": {"ticker": "NVDA", "keyword": "NVIDIA 輝達 AI"},
+    "廣達": {"ticker": "2382.TW", "keyword": "廣達 2382 AI伺服器"},
+    "鴻海": {"ticker": "2317.TW", "keyword": "鴻海 2317 AI伺服器"},
+    "中鋼": {"ticker": "2002.TW", "keyword": "中鋼 2002 鋼價"},
+    "大成鋼": {"ticker": "2027.TW", "keyword": "大成鋼 2027 鋼鋁"},
 }
 
-for name, ticker in news_targets.items():
+for name, info in news_targets.items():
     st.markdown(f"### {name}")
-    news_rows = get_yahoo_news(ticker, limit=3)
+
+    ticker = info["ticker"]
+    keyword = info["keyword"]
+
+    # 台股用 Google News RSS 比 yfinance 更容易抓到中文新聞。
+    if ticker.endswith(".TW"):
+        news_rows = get_google_news(keyword, limit=3)
+    else:
+        news_rows = get_yahoo_news(ticker, limit=3)
+        if not news_rows:
+            news_rows = get_google_news(keyword, limit=3)
 
     if not news_rows:
         st.info("目前沒有抓到新聞。")
