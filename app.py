@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V8.1 Pro", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V9.0 Professional Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -238,6 +238,15 @@ def calculate_kd(df, period=9):
     rsv = (df["Close"] - low_min) / (high_max - low_min) * 100
     df["K"] = rsv.ewm(com=2).mean()
     df["D"] = df["K"].ewm(com=2).mean()
+    return df
+
+
+def calculate_macd(df):
+    ema12=df["Close"].ewm(span=12,adjust=False).mean()
+    ema26=df["Close"].ewm(span=26,adjust=False).mean()
+    df["MACD"]=ema12-ema26
+    df["Signal"]=df["MACD"].ewm(span=9,adjust=False).mean()
+    df["Hist"]=df["MACD"]-df["Signal"]
     return df
 
 def calc_support_resistance(df):
@@ -1440,7 +1449,7 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
 def format_line_alert_message(alert_df, ai_score, steel_score):
     now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
     lines = [
-        f"Hsing 投資儀表板 V8.1 Pro 預警｜{now_text}",
+        f"Hsing 投資儀表板 V9.0 Professional Edition 預警｜{now_text}",
         f"AI溫度：{ai_score} 分｜鋼鐵溫度：{steel_score} 分",
         "",
     ]
@@ -1495,7 +1504,7 @@ def allocation_suggestion(cash, ai_score, steel_score):
 # 主畫面：V7.2 精簡版
 # =====================================================
 
-st.title("🚀 Hsing 投資儀表板 V8.1 Pro 專業投資決策版")
+st.title("🚀 Hsing 投資儀表板 V9.0 Professional Edition 專業投資決策版")
 
 st.markdown("""
 <div class="print-note">
@@ -1785,98 +1794,61 @@ with tab_news:
                 st.markdown(f"**{sentiment}｜{news['標題']}**  \n來源：{news['來源']}")
 
 
+
 with tab_chart:
-    st.subheader("📈 個股K線分析 V8.1 Pro")
+    st.subheader("📈 個股K線分析 V9.0 Professional Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
-    period = st.selectbox("期間", ["1mo","2mo","3mo","6mo","1y","2y"], index=4)
+    period = st.selectbox("期間", ["1mo","3mo","6mo","1y","3y"], index=3)
 
     df = get_data(stock_list[selected_stock], period)
 
-    if df.empty or len(df) < 20:
+    if df.empty or len(df) < 30:
         st.warning("資料不足")
     else:
         df = calculate_kd(df)
+        df = calculate_macd(df)
 
-        chip_daily = get_chip_daily_series(selected_stock)
+        df["MA20"]=df["Close"].rolling(20).mean()
+        df["MA60"]=df["Close"].rolling(60).mean()
+        df["MA120"]=df["Close"].rolling(120).mean()
+        df["BB_MID"]=df["Close"].rolling(20).mean()
+        std=df["Close"].rolling(20).std()
+        df["BB_UP"]=df["BB_MID"]+2*std
+        df["BB_LOW"]=df["BB_MID"]-2*std
 
-        latest_k = float(df["K"].dropna().iloc[-1]) if df["K"].notna().sum() else 50
+        chip_daily=get_chip_daily_series(selected_stock)
 
-        if latest_k > 80:
-            kd_signal = "🔴 KD過熱"
-        elif latest_k < 20:
-            kd_signal = "🟢 KD超跌"
-        else:
-            kd_signal = "🟡 KD中性"
+        fig = make_subplots(rows=6,cols=1,shared_xaxes=True,
+                            vertical_spacing=0.02,
+                            row_heights=[0.42,0.12,0.12,0.12,0.11,0.11])
 
-        st.metric("KD訊號", f"{latest_k:.1f}", kd_signal)
+        fig.add_trace(go.Candlestick(x=df.index,open=df["Open"],high=df["High"],low=df["Low"],close=df["Close"],name="K線"),row=1,col=1)
 
-        df["MA20"] = df["Close"].rolling(20).mean()
-        df["MA60"] = df["Close"].rolling(60).mean()
-        df["MA120"] = df["Close"].rolling(120).mean()
-        df["MA240"] = df["Close"].rolling(240).mean()
+        for ma in ["MA20","MA60","MA120"]:
+            fig.add_trace(go.Scatter(x=df.index,y=df[ma],name=ma),row=1,col=1)
 
-        fig = make_subplots(
-            rows=5,
-            cols=1,
-            shared_xaxes=True,
-            vertical_spacing=0.03,
-            row_heights=[0.45,0.15,0.13,0.13,0.14]
-        )
+        fig.add_trace(go.Scatter(x=df.index,y=df["BB_UP"],name="BB上軌"),row=1,col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=df["BB_LOW"],name="BB下軌"),row=1,col=1)
 
-        fig.add_trace(
-            go.Candlestick(
-                x=df.index,
-                open=df["Open"],
-                high=df["High"],
-                low=df["Low"],
-                close=df["Close"],
-                increasing_line_color="red",
-                decreasing_line_color="green",
-                name="K線"
-            ),
-            row=1,col=1
-        )
-
-        for ma,color in [
-            ("MA20","yellow"),
-            ("MA60","cyan"),
-            ("MA120","orange"),
-            ("MA240","magenta")
-        ]:
-            fig.add_trace(
-                go.Scatter(x=df.index,y=df[ma],name=ma,line=dict(color=color)),
-                row=1,col=1
-            )
-
-        vol_colors = ["red" if c>=o else "green" for c,o in zip(df["Close"],df["Open"])]
-        fig.add_trace(
-            go.Bar(x=df.index,y=df["Volume"]/1000,name="成交量",marker_color=vol_colors),
-            row=2,col=1
-        )
+        fig.add_trace(go.Bar(x=df.index,y=df["Volume"]/1000,name="成交量"),row=2,col=1)
 
         if not chip_daily.empty:
-            fig.add_trace(
-                go.Bar(x=chip_daily.index,y=chip_daily["Foreign"],name="外資買賣超"),
-                row=3,col=1
-            )
-            fig.add_trace(
-                go.Bar(x=chip_daily.index,y=chip_daily["Trust"],name="投信買賣超"),
-                row=4,col=1
-            )
+            fig.add_trace(go.Bar(x=chip_daily.index,y=chip_daily["Foreign"],name="外資"),row=3,col=1)
+            fig.add_trace(go.Bar(x=chip_daily.index,y=chip_daily["Trust"],name="投信"),row=4,col=1)
 
-        fig.add_trace(go.Scatter(x=df.index,y=df["K"],name="K值"),row=5,col=1)
-        fig.add_trace(go.Scatter(x=df.index,y=df["D"],name="D值"),row=5,col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=df["K"],name="K"),row=5,col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=df["D"],name="D"),row=5,col=1)
 
-        fig.update_layout(
-            height=1100,
-            template="plotly_dark",
-            xaxis_rangeslider_visible=False
-        )
+        fig.add_trace(go.Bar(x=df.index,y=df["Hist"],name="MACD Hist"),row=6,col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=df["MACD"],name="MACD"),row=6,col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=df["Signal"],name="Signal"),row=6,col=1)
+
+        visible=min(120,len(df))
+        fig.update_xaxes(range=[df.index[-visible],df.index[-1]])
+        fig.update_layout(height=1400,xaxis_rangeslider_visible=False)
 
         st.plotly_chart(fig,use_container_width=True)
-
-
 with tab_line:
     st.subheader("⚙️ LINE Messaging API 設定說明")
     st.markdown("""
