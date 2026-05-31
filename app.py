@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V7.0 Print Fix", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V7.1", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1270,6 +1270,162 @@ def watchlist_today(portfolio, ai_score, steel_score, chip_score_map):
     return df[["排名", "觀察重點", "健康度", "高檔風險"]]
 
 
+
+
+def get_secret_value(name, default=""):
+    try:
+        value = st.secrets.get(name, default)
+        if value is None:
+            return default
+        return str(value).strip()
+    except Exception:
+        return os.environ.get(name, default).strip()
+
+
+def line_config_status():
+    token = get_secret_value("LINE_CHANNEL_ACCESS_TOKEN")
+    to_id = get_secret_value("LINE_USER_ID") or get_secret_value("LINE_TO_ID")
+
+    if token and to_id:
+        return True, "🟢 LINE Messaging API 已設定完成"
+    return False, "🟡 尚未設定 LINE Token / User ID，系統會顯示預警但不會推播"
+
+
+def send_line_message(message):
+    token = get_secret_value("LINE_CHANNEL_ACCESS_TOKEN")
+    to_id = get_secret_value("LINE_USER_ID") or get_secret_value("LINE_TO_ID")
+
+    if not token or not to_id:
+        return False, "尚未設定 LINE_CHANNEL_ACCESS_TOKEN 與 LINE_USER_ID。"
+
+    url = "https://api.line.me/v2/bot/message/push"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "to": to_id,
+        "messages": [
+            {
+                "type": "text",
+                "text": message[:4500],
+            }
+        ],
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        if response.status_code in [200, 202]:
+            return True, "LINE通知已送出。"
+        return False, f"LINE通知失敗：HTTP {response.status_code}｜{response.text[:300]}"
+    except Exception as e:
+        return False, f"LINE通知失敗：{e}"
+
+
+def calc_consecutive_sell_days(stock_name, investor_keywords):
+    stock_id = stock_id_map[stock_name]
+    df = get_institutional_data(stock_id, days=40)
+
+    if df.empty:
+        return 0
+
+    def day_net(day_df):
+        mask = pd.Series(False, index=day_df.index)
+        for keyword in investor_keywords:
+            mask = mask | day_df["name"].astype(str).str.contains(keyword, case=False, na=False)
+        sub = day_df[mask]
+        if sub.empty:
+            return 0
+        return sub["net"].sum()
+
+    count = 0
+    for date in sorted(df["date"].unique(), reverse=True):
+        daily = df[df["date"] == date]
+        net = day_net(daily)
+        if net < 0:
+            count += 1
+        else:
+            break
+
+    return count
+
+
+def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
+    rows = []
+
+    fg_score, fg_text = fear_greed_index(ai_score, steel_score)
+    if fg_score >= 78:
+        rows.append({"等級": "🟠 市場偏熱", "股票": "整體市場", "訊息": fg_text, "建議": "避免追高，保留現金"})
+    elif fg_score <= 35:
+        rows.append({"等級": "🔴 市場偏恐慌", "股票": "整體市場", "訊息": fg_text, "建議": "先保守，等支撐或分批低接"})
+
+    for stock_name, ticker in stock_list.items():
+        df = get_data(ticker, "1y")
+        if df.empty or len(df) < 120:
+            continue
+
+        current = float(df.iloc[-1]["Close"])
+        rule = long_term_rules[stock_name]
+        health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+        distance, risk_text = risk_distance_from_ma(df)
+        progress, buy_text = buy_point_progress(stock_name, current)
+        add_gap = (current - rule["add"]) / current * 100 if current else 999
+        reduce_gap = (rule["reduce"] - current) / current * 100 if current else 999
+
+        if current <= rule["strong_add"]:
+            rows.append({"等級": "🟢 強力買點", "股票": stock_name, "訊息": f"現價 {current:.2f} 已低於強力加碼價 {rule['strong_add']}", "建議": "可分批加碼，不一次買滿"})
+        elif current <= rule["add"]:
+            rows.append({"等級": "🟢 加碼區", "股票": stock_name, "訊息": f"現價 {current:.2f} 已進入加碼價 {rule['add']} 附近", "建議": "可小量分批"})
+        elif 0 < add_gap <= 2:
+            rows.append({"等級": "🟡 接近買點", "股票": stock_name, "訊息": f"距離加碼價約 {add_gap:.2f}%", "建議": "加入觀察，等待拉回"})
+
+        if current >= rule["reduce"] or "過熱" in risk_text:
+            rows.append({"等級": "🔴 高檔風險", "股票": stock_name, "訊息": f"現價 {current:.2f}｜{risk_text}", "建議": "停止追高，必要時小幅減碼"})
+        elif 0 < reduce_gap <= 3:
+            rows.append({"等級": "🟠 接近減碼區", "股票": stock_name, "訊息": f"距離減碼價約 {reduce_gap:.2f}%", "建議": "續抱但不追價"})
+
+        foreign_buy = calc_consecutive_buy_days(stock_name, ["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"])
+        trust_buy = calc_consecutive_buy_days(stock_name, ["投信", "Investment", "Investment_Trust"])
+        foreign_sell = calc_consecutive_sell_days(stock_name, ["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"])
+        trust_sell = calc_consecutive_sell_days(stock_name, ["投信", "Investment", "Investment_Trust"])
+
+        if foreign_buy >= 5 or trust_buy >= 5:
+            rows.append({"等級": "🟢 法人轉強", "股票": stock_name, "訊息": f"外資連買 {foreign_buy} 天｜投信連買 {trust_buy} 天", "建議": "籌碼偏多，可列入優先觀察"})
+        if foreign_sell >= 5 or trust_sell >= 5:
+            rows.append({"等級": "🔴 法人轉弱", "股票": stock_name, "訊息": f"外資連賣 {foreign_sell} 天｜投信連賣 {trust_sell} 天", "建議": "暫緩加碼，觀察是否止賣"})
+
+        if stock_name in portfolio:
+            cost = float(portfolio[stock_name]["cost"])
+            if cost > 0:
+                cost_gap = (current - cost) / cost * 100
+                if current < cost:
+                    rows.append({"等級": "🔴 跌破成本", "股票": stock_name, "訊息": f"現價 {current:.2f} 低於成本 {cost:.2f}（{cost_gap:.2f}%）", "建議": "不要急攤平，先看趨勢與法人"})
+                elif 0 <= cost_gap <= 2:
+                    rows.append({"等級": "🟡 接近成本", "股票": stock_name, "訊息": f"現價接近成本，差距 {cost_gap:.2f}%", "建議": "觀察是否守住成本區"})
+
+    if not rows:
+        rows.append({"等級": "🔵 無重大預警", "股票": "整體", "訊息": "目前沒有觸發加碼、減碼或法人異常條件", "建議": "依原策略續抱觀察"})
+
+    return pd.DataFrame(rows)
+
+
+def format_line_alert_message(alert_df, ai_score, steel_score):
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
+    lines = [
+        f"Hsing 投資儀表板 V7.1 預警｜{now_text}",
+        f"AI溫度：{ai_score} 分｜鋼鐵溫度：{steel_score} 分",
+        "",
+    ]
+
+    for _, row in alert_df.head(12).iterrows():
+        lines.append(f"{row['等級']}｜{row['股票']}")
+        lines.append(f"{row['訊息']}")
+        lines.append(f"建議：{row['建議']}")
+        lines.append("")
+
+    lines.append("提醒：此為儀表板輔助判斷，請搭配資金控管。")
+    return "\n".join(lines)
+
 def allocation_suggestion(cash, ai_score, steel_score):
     weights = {
         "台積電": 0.45,
@@ -1310,7 +1466,7 @@ def allocation_suggestion(cash, ai_score, steel_score):
 # 主畫面
 # =====================================================
 
-st.title("🤖 Hsing 投資儀表板 V7.0 智能投資管家｜列印優化版")
+st.title("🚨 Hsing 投資儀表板 V7.1 自動預警版 + LINE通知版")
 
 st.markdown("""
 <div class="print-note">
@@ -1323,13 +1479,17 @@ st.markdown("""
 
 
 st.info("""
-V7.0 智能投資管家新增功能：
+V7.1 自動預警版新增功能：
 ✅ AI投資總結
 ✅ 操作燈號中心
 ✅ 資產配置雷達
 ✅ 台股恐慌貪婪指數
 ✅ 除權息 / 股息收入估算
 ✅ 今日重點觀察清單
+✅ 超級買點預警
+✅ 法人連買 / 連賣警報
+✅ 成本價警示整合
+✅ LINE Messaging API 推播通知
 
 V6.4a 功能：
 ✅ 報酬率顯示百分比
@@ -1408,8 +1568,60 @@ for alert in alerts:
 
 st.divider()
 
+st.subheader("🚨 V7.1 自動預警中心")
+line_ready, line_status = line_config_status()
+st.info(line_status)
+st.caption("LINE Notify 已於 2025/03/31 結束服務；本版使用 LINE Messaging API。若未設定 Token，預警仍會在儀表板顯示，不會推播。")
 
-st.subheader("🤖 V7.0 AI投資管家總結")
+auto_alert_df = build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map)
+st.dataframe(auto_alert_df, use_container_width=True, hide_index=True)
+
+line_message = format_line_alert_message(auto_alert_df, ai_score, steel_score)
+
+col_line1, col_line2 = st.columns(2)
+with col_line1:
+    if st.button("📲 手動發送 LINE 預警", disabled=not line_ready):
+        ok, msg = send_line_message(line_message)
+        if ok:
+            st.success(msg)
+        else:
+            st.error(msg)
+
+with col_line2:
+    today_key = datetime.now().strftime("%Y%m%d")
+    if "line_sent_date" not in st.session_state:
+        st.session_state["line_sent_date"] = ""
+
+    auto_send = st.checkbox("今天開啟後自動發送一次", value=False, disabled=not line_ready)
+    if auto_send and line_ready and st.session_state["line_sent_date"] != today_key:
+        ok, msg = send_line_message(line_message)
+        if ok:
+            st.session_state["line_sent_date"] = today_key
+            st.success("今日 LINE 預警已自動發送一次。")
+        else:
+            st.error(msg)
+    elif auto_send and st.session_state["line_sent_date"] == today_key:
+        st.info("今日已發送過一次，避免重複推播。")
+
+with st.expander("LINE Messaging API 設定說明"):
+    st.markdown("""
+    1. 建立 LINE 官方帳號，並啟用 Messaging API。  
+    2. 到 LINE Developers 取得 **Channel access token**。  
+    3. 取得你的 **User ID** 或群組 ID。  
+    4. 在 Streamlit Cloud 的 **Secrets** 加入：
+
+    ```toml
+    LINE_CHANNEL_ACCESS_TOKEN = "你的 Channel access token"
+    LINE_USER_ID = "你的 userId 或 groupId"
+    ```
+
+    儲存後重新部署即可使用 LINE 推播。
+    """)
+
+st.divider()
+
+
+st.subheader("🤖 V7.1 AI投資管家總結")
 
 fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 c1, c2, c3 = st.columns(3)
@@ -1465,7 +1677,7 @@ if not div_df.empty:
 st.divider()
 
 
-st.subheader("🧭 V7.0 本週策略中心")
+st.subheader("🧭 V7.1 本週策略中心")
 
 strategy_rows = []
 for stock_name, ticker in stock_list.items():
@@ -1522,7 +1734,7 @@ st.dataframe(rank_df, use_container_width=True, hide_index=True)
 st.divider()
 
 
-st.subheader("🧰 V7.0 持股管理中心")
+st.subheader("🧰 V7.1 持股管理中心")
 v64_df = v64_dashboard_rows(portfolio, cash_input)
 if not v64_df.empty:
     st.dataframe(v64_df, use_container_width=True, hide_index=True)
@@ -1678,7 +1890,7 @@ for name, info in news_targets.items():
 st.divider()
 
 
-st.subheader("🎯 V7.0 個人加碼地圖")
+st.subheader("🎯 V7.1 個人加碼地圖")
 
 map_rows = []
 for stock_name, ticker in stock_list.items():
@@ -1854,7 +2066,7 @@ if not portfolio_df.empty:
 st.divider()
 
 
-st.subheader("🩺 V7.0 個股診斷中心")
+st.subheader("🩺 V7.1 個股診斷中心")
 
 diag_stock = st.selectbox("選擇要診斷的股票", list(stock_list.keys()), key="diag_stock")
 diag = stock_diagnosis(diag_stock, stock_list[diag_stock], ai_score, steel_score, chip_score_map)
