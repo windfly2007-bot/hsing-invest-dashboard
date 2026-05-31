@@ -230,6 +230,15 @@ def market_card(title, value, pct):
     """
 
 
+
+def calculate_kd(df, period=9):
+    low_min = df["Low"].rolling(period).min()
+    high_max = df["High"].rolling(period).max()
+    rsv = (df["Close"] - low_min) / (high_max - low_min) * 100
+    df["K"] = rsv.ewm(com=2).mean()
+    df["D"] = df["K"].ewm(com=2).mean()
+    return df
+
 def calc_support_resistance(df):
     recent = df.tail(20)
     current = recent.iloc[-1]["Close"]
@@ -396,6 +405,24 @@ def get_institutional_data(stock_id, days=45):
 
     except Exception:
         return pd.DataFrame()
+
+
+
+def get_chip_daily_series(stock_name):
+    stock_id = stock_id_map[stock_name]
+    df = get_institutional_data(stock_id, days=120)
+    if df.empty:
+        return pd.DataFrame()
+
+    foreign_mask = df["name"].astype(str).str.contains("外資|Foreign", case=False, na=False)
+    trust_mask = df["name"].astype(str).str.contains("投信|Investment", case=False, na=False)
+
+    foreign = df[foreign_mask].groupby("date")["net"].sum()/1000
+    trust = df[trust_mask].groupby("date")["net"].sum()/1000
+
+    out = pd.DataFrame({"Foreign": foreign, "Trust": trust}).fillna(0)
+    out.index = pd.to_datetime(out.index)
+    return out.sort_index()
 
 
 def summarize_institutional(stock_name):
@@ -1756,40 +1783,45 @@ with tab_news:
             else:
                 st.markdown(f"**{sentiment}｜{news['標題']}**  \n來源：{news['來源']}")
 
+
 with tab_chart:
-    st.subheader("📊 單檔股票分析")
+    st.subheader("📈 個股K線分析 V8.0 Pro")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
-    period = st.selectbox("期間", ["1mo", "2mo", "3mo", "6mo", "1y", "2y"], index=4)
+    period = st.selectbox("期間", ["1mo","2mo","3mo","6mo","1y","2y"], index=4)
 
     df = get_data(stock_list[selected_stock], period)
-    min_required = 15 if period in ["1mo", "2mo"] else 30
 
-    if df.empty or len(df) < min_required:
-        st.warning("資料不足，請改選較長期間。")
+    if df.empty or len(df) < 20:
+        st.warning("資料不足")
     else:
-        latest = df.iloc[-1]
-        prev = df.iloc[-2]
+        df = calculate_kd(df)
 
-        change = latest["Close"] - prev["Close"]
-        change_pct = change / prev["Close"] * 100
-        support, resistance = calc_support_resistance(df)
+        chip_daily = get_chip_daily_series(selected_stock)
 
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        col1.metric("股票", selected_stock)
-        col2.metric("收盤價", f"{latest['Close']:.2f}")
-        col3.markdown(f'<div>漲跌</div><div class="big-profit {tw_color(change)}-text">{change:+.2f}</div>', unsafe_allow_html=True)
-        col4.markdown(f'<div>漲跌幅</div><div class="big-profit {tw_color(change_pct)}-text">{change_pct:+.2f}%</div>', unsafe_allow_html=True)
-        col5.metric("近期支撐", f"{support:.2f}")
-        col6.metric("近期壓力", f"{resistance:.2f}")
+        latest_k = float(df["K"].dropna().iloc[-1]) if df["K"].notna().sum() else 50
 
-        df["MA5"] = df["Close"].rolling(5).mean()
+        if latest_k > 80:
+            kd_signal = "🔴 KD過熱"
+        elif latest_k < 20:
+            kd_signal = "🟢 KD超跌"
+        else:
+            kd_signal = "🟡 KD中性"
+
+        st.metric("KD訊號", f"{latest_k:.1f}", kd_signal)
+
         df["MA20"] = df["Close"].rolling(20).mean()
         df["MA60"] = df["Close"].rolling(60).mean()
         df["MA120"] = df["Close"].rolling(120).mean()
         df["MA240"] = df["Close"].rolling(240).mean()
 
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.76, 0.24])
+        fig = make_subplots(
+            rows=5,
+            cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.03,
+            row_heights=[0.45,0.15,0.13,0.13,0.14]
+        )
 
         fig.add_trace(
             go.Candlestick(
@@ -1800,46 +1832,49 @@ with tab_chart:
                 close=df["Close"],
                 increasing_line_color="red",
                 decreasing_line_color="green",
-                increasing_fillcolor="red",
-                decreasing_fillcolor="green",
-                name="K線",
+                name="K線"
             ),
-            row=1,
-            col=1,
+            row=1,col=1
         )
 
-        ma_settings = [
-            ("MA5", "yellow"),
-            ("MA20", "white"),
-            ("MA60", "cyan"),
-            ("MA120", "orange"),
-            ("MA240", "magenta"),
-        ]
+        for ma,color in [
+            ("MA20","yellow"),
+            ("MA60","cyan"),
+            ("MA120","orange"),
+            ("MA240","magenta")
+        ]:
+            fig.add_trace(
+                go.Scatter(x=df.index,y=df[ma],name=ma,line=dict(color=color)),
+                row=1,col=1
+            )
 
-        for ma, color in ma_settings:
-            if df[ma].notna().sum() > 0:
-                fig.add_trace(go.Scatter(x=df.index, y=df[ma], name=ma, line=dict(color=color, width=2)), row=1, col=1)
+        vol_colors = ["red" if c>=o else "green" for c,o in zip(df["Close"],df["Open"])]
+        fig.add_trace(
+            go.Bar(x=df.index,y=df["Volume"]/1000,name="成交量",marker_color=vol_colors),
+            row=2,col=1
+        )
 
-        fig.add_hline(y=support, line_dash="dash", line_color="green", row=1, col=1)
-        fig.add_hline(y=resistance, line_dash="dash", line_color="red", row=1, col=1)
-        fig.add_hline(y=latest["Close"], line_dash="dot", line_color="white", row=1, col=1)
+        if not chip_daily.empty:
+            fig.add_trace(
+                go.Bar(x=chip_daily.index,y=chip_daily["Foreign"],name="外資買賣超"),
+                row=3,col=1
+            )
+            fig.add_trace(
+                go.Bar(x=chip_daily.index,y=chip_daily["Trust"],name="投信買賣超"),
+                row=4,col=1
+            )
 
-        volume_colors = ["red" if c >= o else "green" for c, o in zip(df["Close"], df["Open"])]
-        fig.add_trace(go.Bar(x=df.index, y=df["Volume"] / 1000, name="成交量(張)", marker_color=volume_colors, opacity=0.65), row=2, col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=df["K"],name="K值"),row=5,col=1)
+        fig.add_trace(go.Scatter(x=df.index,y=df["D"],name="D值"),row=5,col=1)
 
         fig.update_layout(
-            height=620,
+            height=1100,
             template="plotly_dark",
-            xaxis_rangeslider_visible=False,
-            hovermode="x unified",
-            font=dict(size=18),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            margin=dict(l=30, r=50, t=45, b=30),
+            xaxis_rangeslider_visible=False
         )
 
-        fig.update_yaxes(title_text="股價", row=1, col=1)
-        fig.update_yaxes(title_text="成交量(張)", row=2, col=1)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig,use_container_width=True)
+
 
 with tab_line:
     st.subheader("⚙️ LINE Messaging API 設定說明")
