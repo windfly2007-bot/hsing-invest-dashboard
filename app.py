@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V7.0", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V7.0 Print Fix", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1310,7 +1310,17 @@ def allocation_suggestion(cash, ai_score, steel_score):
 # 主畫面
 # =====================================================
 
-st.title("🤖 Hsing 投資儀表板 V7.0 智能投資管家")
+st.title("🤖 Hsing 投資儀表板 V7.0 智能投資管家｜列印優化版")
+
+st.markdown("""
+<div class="print-note">
+<b>列印建議：</b>
+使用瀏覽器列印時，建議選擇「另存為 PDF」、
+紙張 A4、邊界選「預設」或「最小」、縮放建議 80%～90%。
+若 K 線圖仍被切到，建議先把期間切到 1M 或 2M 再列印。
+</div>
+""", unsafe_allow_html=True)
+
 
 st.info("""
 V7.0 智能投資管家新增功能：
@@ -1944,13 +1954,13 @@ else:
     fig.add_trace(go.Bar(x=df.index, y=df["Volume"] / 1000, name="成交量(張)", marker_color=volume_colors, opacity=0.65), row=2, col=1)
 
     fig.update_layout(
-        height=900,
+        height=620,
         template="plotly_dark",
         xaxis_rangeslider_visible=False,
         hovermode="x unified",
         font=dict(size=18),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=40, r=100, t=70, b=40),
+        margin=dict(l=30, r=50, t=45, b=30),
     )
 
     fig.update_yaxes(title_text="股價", row=1, col=1)
