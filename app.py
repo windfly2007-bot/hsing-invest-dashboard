@@ -1462,65 +1462,20 @@ def allocation_suggestion(cash, ai_score, steel_score):
     return pd.DataFrame(rows)
 
 
+
 # =====================================================
-# 主畫面
+# 主畫面：V7.2 精簡版
 # =====================================================
 
-st.title("🚨 Hsing 投資儀表板 V7.1 自動預警版 + LINE通知版")
+st.title("🧭 Hsing 投資儀表板 V7.2 精簡決策版")
 
 st.markdown("""
 <div class="print-note">
-<b>列印建議：</b>
-使用瀏覽器列印時，建議選擇「另存為 PDF」、
-紙張 A4、邊界選「預設」或「最小」、縮放建議 80%～90%。
-若 K 線圖仍被切到，建議先把期間切到 1M 或 2M 再列印。
+<b>V7.2 精簡重點：</b>
+首頁只保留「今日該看什麼、要不要買、持股狀態」。
+詳細資料改放在分頁內，避免列印與瀏覽時內容重複。
 </div>
 """, unsafe_allow_html=True)
-
-
-st.info("""
-V7.1 自動預警版新增功能：
-✅ AI投資總結
-✅ 操作燈號中心
-✅ 資產配置雷達
-✅ 台股恐慌貪婪指數
-✅ 除權息 / 股息收入估算
-✅ 今日重點觀察清單
-✅ 超級買點預警
-✅ 法人連買 / 連賣警報
-✅ 成本價警示整合
-✅ LINE Messaging API 推播通知
-
-V6.4a 功能：
-✅ 報酬率顯示百分比
-✅ 健康度顏色強化
-✅ 整體字體放大
-✅ 持股績效前三名獎牌
-✅ 表格可讀性優化
-✅ 修正標題貼頂顯示
-✅ 持股績效排名
-✅ 跌破成本警示
-✅ 加碼股數試算
-✅ 技術面燈號
-✅ 股利殖利率參考
-
-V6.3 功能：
-✅ 本週策略中心
-✅ 買點雷達進度條
-✅ 法人強度排行榜
-✅ AI / 鋼鐵領先指數
-✅ 個股診斷中心
-✅ 持股健康度2.0
-
-V6.0 新增功能：
-✅ 外資/投信連買天數
-✅ ADR隔日提示
-✅ 加碼紅綠燈
-✅ 長線評分
-✅ AI/鋼鐵市場溫度
-✅ 個人化資金配置建議
-""")
-
 
 saved_portfolio = load_portfolio()
 
@@ -1534,7 +1489,6 @@ with st.sidebar:
 
     for stock_name in stock_list.keys():
         st.markdown(f"### {stock_name}")
-
         default_shares = saved_portfolio.get(stock_name, {"shares": 0})["shares"]
         default_cost = saved_portfolio.get(stock_name, {"cost": 0.0})["cost"]
 
@@ -1559,56 +1513,341 @@ for stock_name in stock_list:
     chip_score_map[stock_name] = row.pop("chip_score_20", 0)
     chip_rows.append(row)
 
-# 今日提醒
-st.subheader("🔔 今日提醒")
-alerts = generate_alerts(ai_score, steel_score, chip_score_map)
+alert_df = build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map)
+line_ready, line_msg = line_config_status()
 
-for alert in alerts:
-    st.markdown(f'<div class="alert-card">{alert}</div>', unsafe_allow_html=True)
+# 常用資料先算一次
+summary_df = ai_investment_summary(portfolio, ai_score, steel_score, chip_score_map)
+watch_df = watchlist_today(portfolio, ai_score, steel_score, chip_score_map)
+perf_df = portfolio_performance_rows(portfolio, fee_discount)
+warn_df = cost_warning_rows(portfolio)
+alloc_summary, alloc_note = asset_allocation_summary(portfolio)
+div_df, total_div = dividend_rows(portfolio)
+fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
-st.divider()
+# =====================================================
+# 首頁決策區
+# =====================================================
 
-st.subheader("🚨 V7.1 自動預警中心")
-line_ready, line_status = line_config_status()
-st.info(line_status)
-st.caption("LINE Notify 已於 2025/03/31 結束服務；本版使用 LINE Messaging API。若未設定 Token，預警仍會在儀表板顯示，不會推播。")
+st.subheader("📌 今日決策總覽")
 
-auto_alert_df = build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map)
-st.dataframe(auto_alert_df, use_container_width=True, hide_index=True)
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("恐慌貪婪", f"{fg_score} 分")
+c2.metric("AI溫度", f"{ai_score} 分")
+c3.metric("鋼鐵溫度", f"{steel_score} 分")
+c4.metric("預估股息", f"{total_div:,.0f} 元")
 
-line_message = format_line_alert_message(auto_alert_df, ai_score, steel_score)
+st.info(fg_text)
 
-col_line1, col_line2 = st.columns(2)
-with col_line1:
-    if st.button("📲 手動發送 LINE 預警", disabled=not line_ready):
-        ok, msg = send_line_message(line_message)
+top_alerts = alert_df.head(5) if not alert_df.empty else pd.DataFrame()
+if not top_alerts.empty:
+    st.subheader("🚨 今日重要預警")
+    st.dataframe(top_alerts, use_container_width=True, hide_index=True)
+
+st.subheader("🚦 操作燈號")
+if not summary_df.empty:
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+st.subheader("🎯 今日重點觀察")
+if not watch_df.empty:
+    st.dataframe(watch_df.head(5), use_container_width=True, hide_index=True)
+
+st.subheader("📊 持股概況")
+if not perf_df.empty:
+    st.dataframe(perf_df, use_container_width=True, hide_index=True)
+
+# =====================================================
+# 分頁細節
+# =====================================================
+
+tab_alert, tab_portfolio, tab_market, tab_news, tab_chart, tab_line = st.tabs([
+    "🚨 預警 / LINE",
+    "💰 持股 / 配置",
+    "📊 市場 / 籌碼",
+    "📰 新聞",
+    "📈 K線",
+    "⚙️ LINE設定",
+])
+
+with tab_alert:
+    st.subheader("🚨 自動預警中心")
+    st.info(line_msg)
+    st.dataframe(alert_df, use_container_width=True, hide_index=True)
+
+    st.caption("LINE Notify 已於 2025/03/31 結束服務；本版使用 LINE Messaging API。未設定 Token 時，只會在儀表板顯示預警，不會推播。")
+
+    col_send, col_auto = st.columns([1, 2])
+    with col_send:
+        if st.button("📲 手動發送 LINE 預警", disabled=not line_ready):
+            msg = format_line_alert_message(alert_df, ai_score, steel_score)
+            ok, result = send_line_message(msg)
+            if ok:
+                st.success(result)
+            else:
+                st.error(result)
+
+    with col_auto:
+        auto_send = st.checkbox("今天開啟後自動發送一次", value=False)
+
+    today_key = datetime.now().strftime("%Y-%m-%d")
+    session_key = f"line_alert_sent_{today_key}"
+
+    if auto_send and line_ready and not st.session_state.get(session_key, False):
+        msg = format_line_alert_message(alert_df, ai_score, steel_score)
+        ok, result = send_line_message(msg)
         if ok:
-            st.success(msg)
-        else:
-            st.error(msg)
-
-with col_line2:
-    today_key = datetime.now().strftime("%Y%m%d")
-    if "line_sent_date" not in st.session_state:
-        st.session_state["line_sent_date"] = ""
-
-    auto_send = st.checkbox("今天開啟後自動發送一次", value=False, disabled=not line_ready)
-    if auto_send and line_ready and st.session_state["line_sent_date"] != today_key:
-        ok, msg = send_line_message(line_message)
-        if ok:
-            st.session_state["line_sent_date"] = today_key
+            st.session_state[session_key] = True
             st.success("今日 LINE 預警已自動發送一次。")
         else:
-            st.error(msg)
-    elif auto_send and st.session_state["line_sent_date"] == today_key:
-        st.info("今日已發送過一次，避免重複推播。")
+            st.error(result)
 
-with st.expander("LINE Messaging API 設定說明"):
+with tab_portfolio:
+    st.subheader("💰 持股追蹤")
+
+    portfolio_rows = []
+    total_cost = 0
+    total_value = 0
+    total_profit = 0
+
+    for stock_name, info in portfolio.items():
+        df_p = get_data(stock_list[stock_name], "5d")
+        if df_p.empty or len(df_p) < 2:
+            continue
+
+        current = float(df_p.iloc[-1]["Close"])
+        buy_amount, sell_amount, net_profit, net_profit_pct = calc_net_profit(
+            info["shares"], info["cost"], current, fee_discount
+        )
+
+        total_cost += buy_amount
+        total_value += sell_amount
+        total_profit += net_profit
+
+        portfolio_rows.append({
+            "股票": stock_name,
+            "股數": info["shares"],
+            "成本": info["cost"],
+            "現價": round(current, 2),
+            "已扣費損益": colored_text(round(net_profit)),
+            "報酬率": colored_text(round(net_profit_pct, 2), "%"),
+        })
+
+    total_profit_pct = total_profit / total_cost * 100 if total_cost else 0
+
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("投入成本", f"{total_cost:,.0f}")
+    p2.metric("目前市值", f"{total_value:,.0f}")
+    p3.markdown(f'<div>已扣費總損益</div><div class="big-profit {tw_color(total_profit)}-text">{total_profit:,.0f}</div>', unsafe_allow_html=True)
+    p4.markdown(f'<div>已扣費報酬率</div><div class="big-profit {tw_color(total_profit_pct)}-text">{total_profit_pct:.2f}%</div>', unsafe_allow_html=True)
+
+    portfolio_df = pd.DataFrame(portfolio_rows)
+    if not portfolio_df.empty:
+        st.markdown(portfolio_df.to_html(escape=False, index=False), unsafe_allow_html=True)
+
+    st.subheader("🏆 持股績效排名")
+    if not perf_df.empty:
+        st.dataframe(perf_df, use_container_width=True, hide_index=True)
+
+    st.subheader("🚨 成本價警示")
+    if not warn_df.empty:
+        st.dataframe(warn_df, use_container_width=True, hide_index=True)
+
+    st.subheader("📦 資產配置雷達")
+    if not alloc_summary.empty:
+        st.dataframe(alloc_summary, use_container_width=True, hide_index=True)
+    st.info(alloc_note)
+
+    st.subheader("💵 股息收入估算")
+    if not div_df.empty:
+        st.dataframe(div_df, use_container_width=True, hide_index=True)
+        st.metric("預估全年股息收入", f"{total_div:,.0f} 元")
+
+    st.subheader("💵 新資金配置建議")
+    allocation_df = allocation_suggestion(cash_input, ai_score, steel_score)
+    st.dataframe(allocation_df, use_container_width=True, hide_index=True)
+
+with tab_market:
+    st.subheader("🤖 AI / 半導體市場")
+    cols = st.columns(len(ai_market_list))
+    for i, (name, ticker) in enumerate(ai_market_list.items()):
+        latest, pct = get_latest_pct(ticker)
+        cols[i].markdown(market_card(name, "N/A" if latest is None else f"{latest:.2f}", pct), unsafe_allow_html=True)
+    st.metric("AI市場溫度", f"{ai_score} 分")
+    st.info(ai_temperature_comment(ai_score))
+
+    st.subheader("🏗️ 鋼鐵 / 原物料")
+    cols = st.columns(len(commodity_list))
+    for i, (name, ticker) in enumerate(commodity_list.items()):
+        latest, pct = get_latest_pct(ticker)
+        cols[i].markdown(market_card(name, "N/A" if latest is None else f"{latest:.2f}", pct), unsafe_allow_html=True)
+    st.metric("鋼鐵市場溫度", f"{steel_score} 分")
+    st.info(steel_temperature_comment(steel_score))
+
+    st.subheader("📊 法人籌碼 5日 / 20日")
+    chip_df = pd.DataFrame(chip_rows)
+    st.dataframe(chip_df, use_container_width=True, hide_index=True)
+
+    st.subheader("📈 法人連買天數")
+    consecutive_rows = []
+    for stock_name in stock_list:
+        foreign_days = calc_consecutive_buy_days(
+            stock_name,
+            ["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"]
+        )
+        trust_days = calc_consecutive_buy_days(
+            stock_name,
+            ["投信", "Investment", "Investment_Trust"]
+        )
+        if foreign_days >= 5 or trust_days >= 5:
+            signal = "🟢 籌碼偏多"
+        elif foreign_days >= 2 or trust_days >= 2:
+            signal = "🔵 籌碼轉強觀察"
+        else:
+            signal = "🟡 尚未連續買超"
+
+        consecutive_rows.append({
+            "股票": stock_name,
+            "外資連買": f"{foreign_days} 天",
+            "投信連買": f"{trust_days} 天",
+            "籌碼燈號": signal,
+        })
+
+    st.dataframe(pd.DataFrame(consecutive_rows), use_container_width=True, hide_index=True)
+
+    st.subheader("🏆 法人強度排行榜")
+    rank_df = institutional_strength_rank()
+    st.dataframe(rank_df, use_container_width=True, hide_index=True)
+
+    st.subheader("🌙 台積電 ADR / 美股隔日提示")
+    adr_info = adr_prediction_text()
+    st.markdown(f"""
+    <div class="alert-card">
+    <b>{adr_info['判斷']}</b><br>
+    依據：{adr_info['依據']}<br>
+    建議：{adr_info['建議']}
+    </div>
+    """, unsafe_allow_html=True)
+
+with tab_news:
+    st.subheader("📰 今日個股新聞摘要")
+
+    for name, info in news_targets.items():
+        st.markdown(f"### {name}")
+        ticker = info["ticker"]
+        keyword = info["keyword"]
+
+        if ticker.endswith(".TW"):
+            news_rows = get_google_news(keyword, limit=3)
+        else:
+            news_rows = get_yahoo_news(ticker, limit=3)
+            if not news_rows:
+                news_rows = get_google_news(keyword, limit=3)
+
+        if not news_rows:
+            st.info("目前沒有抓到新聞。")
+            continue
+
+        for news in news_rows:
+            sentiment = news_sentiment(news["標題"])
+            link = news["連結"]
+
+            if link:
+                st.markdown(f"**{sentiment}｜{news['標題']}**  \n來源：{news['來源']}  \n[閱讀新聞]({link})")
+            else:
+                st.markdown(f"**{sentiment}｜{news['標題']}**  \n來源：{news['來源']}")
+
+with tab_chart:
+    st.subheader("📊 單檔股票分析")
+
+    selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
+    period = st.selectbox("期間", ["1mo", "2mo", "3mo", "6mo", "1y", "2y"], index=4)
+
+    df = get_data(stock_list[selected_stock], period)
+    min_required = 15 if period in ["1mo", "2mo"] else 30
+
+    if df.empty or len(df) < min_required:
+        st.warning("資料不足，請改選較長期間。")
+    else:
+        latest = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        change = latest["Close"] - prev["Close"]
+        change_pct = change / prev["Close"] * 100
+        support, resistance = calc_support_resistance(df)
+
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1.metric("股票", selected_stock)
+        col2.metric("收盤價", f"{latest['Close']:.2f}")
+        col3.markdown(f'<div>漲跌</div><div class="big-profit {tw_color(change)}-text">{change:+.2f}</div>', unsafe_allow_html=True)
+        col4.markdown(f'<div>漲跌幅</div><div class="big-profit {tw_color(change_pct)}-text">{change_pct:+.2f}%</div>', unsafe_allow_html=True)
+        col5.metric("近期支撐", f"{support:.2f}")
+        col6.metric("近期壓力", f"{resistance:.2f}")
+
+        df["MA5"] = df["Close"].rolling(5).mean()
+        df["MA20"] = df["Close"].rolling(20).mean()
+        df["MA60"] = df["Close"].rolling(60).mean()
+        df["MA120"] = df["Close"].rolling(120).mean()
+        df["MA240"] = df["Close"].rolling(240).mean()
+
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.76, 0.24])
+
+        fig.add_trace(
+            go.Candlestick(
+                x=df.index,
+                open=df["Open"],
+                high=df["High"],
+                low=df["Low"],
+                close=df["Close"],
+                increasing_line_color="red",
+                decreasing_line_color="green",
+                increasing_fillcolor="red",
+                decreasing_fillcolor="green",
+                name="K線",
+            ),
+            row=1,
+            col=1,
+        )
+
+        ma_settings = [
+            ("MA5", "yellow"),
+            ("MA20", "white"),
+            ("MA60", "cyan"),
+            ("MA120", "orange"),
+            ("MA240", "magenta"),
+        ]
+
+        for ma, color in ma_settings:
+            if df[ma].notna().sum() > 0:
+                fig.add_trace(go.Scatter(x=df.index, y=df[ma], name=ma, line=dict(color=color, width=2)), row=1, col=1)
+
+        fig.add_hline(y=support, line_dash="dash", line_color="green", row=1, col=1)
+        fig.add_hline(y=resistance, line_dash="dash", line_color="red", row=1, col=1)
+        fig.add_hline(y=latest["Close"], line_dash="dot", line_color="white", row=1, col=1)
+
+        volume_colors = ["red" if c >= o else "green" for c, o in zip(df["Close"], df["Open"])]
+        fig.add_trace(go.Bar(x=df.index, y=df["Volume"] / 1000, name="成交量(張)", marker_color=volume_colors, opacity=0.65), row=2, col=1)
+
+        fig.update_layout(
+            height=620,
+            template="plotly_dark",
+            xaxis_rangeslider_visible=False,
+            hovermode="x unified",
+            font=dict(size=18),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(l=30, r=50, t=45, b=30),
+        )
+
+        fig.update_yaxes(title_text="股價", row=1, col=1)
+        fig.update_yaxes(title_text="成交量(張)", row=2, col=1)
+        st.plotly_chart(fig, use_container_width=True)
+
+with tab_line:
+    st.subheader("⚙️ LINE Messaging API 設定說明")
     st.markdown("""
     1. 建立 LINE 官方帳號，並啟用 Messaging API。  
     2. 到 LINE Developers 取得 **Channel access token**。  
-    3. 取得你的 **User ID** 或群組 ID。  
-    4. 在 Streamlit Cloud 的 **Secrets** 加入：
+    3. 取得你的 **User ID** 或 Group ID。  
+    4. 到 Streamlit Cloud → App → Settings → Secrets 加入：
 
     ```toml
     LINE_CHANNEL_ACCESS_TOKEN = "你的 Channel access token"
@@ -1617,565 +1856,3 @@ with st.expander("LINE Messaging API 設定說明"):
 
     儲存後重新部署即可使用 LINE 推播。
     """)
-
-st.divider()
-
-
-st.subheader("🤖 V7.1 AI投資管家總結")
-
-fg_score, fg_text = fear_greed_index(ai_score, steel_score)
-c1, c2, c3 = st.columns(3)
-c1.metric("台股恐慌貪婪指數", f"{fg_score} 分")
-c2.metric("AI市場溫度", f"{ai_score} 分")
-c3.metric("鋼鐵市場溫度", f"{steel_score} 分")
-st.info(fg_text)
-
-summary_df = ai_investment_summary(portfolio, ai_score, steel_score, chip_score_map)
-if not summary_df.empty:
-    st.dataframe(summary_df, use_container_width=True, hide_index=True)
-
-st.subheader("🚦 操作燈號中心")
-signal_rows = []
-for stock_name, ticker in stock_list.items():
-    df_sig = get_data(ticker, "1y")
-    if df_sig.empty or len(df_sig) < 120:
-        continue
-
-    current_sig = float(df_sig.iloc[-1]["Close"])
-    health_sig = score_stock(stock_name, df_sig, ai_score, steel_score, chip_score_map.get(stock_name, 0))
-    _, risk_sig = risk_distance_from_ma(df_sig)
-    sig, reason = operation_signal(stock_name, current_sig, health_sig, chip_score_map.get(stock_name, 0), risk_sig)
-
-    signal_rows.append({
-        "股票": stock_name,
-        "燈號": sig,
-        "原因": reason,
-        "現價": round(current_sig, 2),
-        "健康度": health_display(health_sig),
-    })
-
-if signal_rows:
-    st.dataframe(pd.DataFrame(signal_rows), use_container_width=True, hide_index=True)
-
-st.subheader("🎯 今日重點觀察")
-watch_df = watchlist_today(portfolio, ai_score, steel_score, chip_score_map)
-if not watch_df.empty:
-    st.dataframe(watch_df, use_container_width=True, hide_index=True)
-
-st.subheader("📦 資產配置雷達")
-alloc_summary, alloc_note = asset_allocation_summary(portfolio)
-if not alloc_summary.empty:
-    st.dataframe(alloc_summary, use_container_width=True, hide_index=True)
-st.info(alloc_note)
-
-st.subheader("💵 除權息 / 股息收入估算")
-div_df, total_div = dividend_rows(portfolio)
-if not div_df.empty:
-    st.dataframe(div_df, use_container_width=True, hide_index=True)
-    st.metric("預估全年股息收入", f"{total_div:,.0f} 元")
-
-st.divider()
-
-
-st.subheader("🧭 V7.1 本週策略中心")
-
-strategy_rows = []
-for stock_name, ticker in stock_list.items():
-    df_s = get_data(ticker, "1y")
-    if df_s.empty or len(df_s) < 120:
-        continue
-
-    current_s = float(df_s.iloc[-1]["Close"])
-    health_s = score_stock(stock_name, df_s, ai_score, steel_score, chip_score_map.get(stock_name, 0))
-    _, risk_s = risk_distance_from_ma(df_s)
-    strategy_s, reason_s = weekly_strategy(
-        stock_name,
-        current_s,
-        health_s,
-        chip_score_map.get(stock_name, 0),
-        risk_s
-    )
-
-    progress_s, buy_text_s = buy_point_progress(stock_name, current_s)
-
-    strategy_rows.append({
-        "股票": stock_name,
-        "本週建議": strategy_s,
-        "理由": reason_s,
-        "買點狀態": buy_text_s,
-        "健康度": health_display(health_s),
-    })
-
-if strategy_rows:
-    st.dataframe(pd.DataFrame(strategy_rows), use_container_width=True, hide_index=True)
-
-st.subheader("📊 買點雷達")
-for stock_name, ticker in stock_list.items():
-    df_b = get_data(ticker, "1y")
-    if df_b.empty:
-        continue
-
-    current_b = float(df_b.iloc[-1]["Close"])
-    progress_b, text_b = buy_point_progress(stock_name, current_b)
-    st.write(f"**{stock_name}**｜現價 {current_b:.2f}｜加碼價 {long_term_rules[stock_name]['add']}｜{text_b}")
-    st.progress(progress_b / 100)
-
-st.subheader("🔥 AI / 鋼鐵領先指數")
-leader_ai, leader_ai_msg = leader_index_score()
-leader_steel, leader_steel_msg = steel_leader_index_score()
-c1, c2 = st.columns(2)
-c1.metric("AI領先指數", f"{leader_ai} 分", leader_ai_msg)
-c2.metric("鋼鐵領先指數", f"{leader_steel} 分", leader_steel_msg)
-
-st.subheader("🏆 法人強度排行榜")
-rank_df = institutional_strength_rank()
-st.dataframe(rank_df, use_container_width=True, hide_index=True)
-
-st.divider()
-
-
-st.subheader("🧰 V7.1 持股管理中心")
-v64_df = v64_dashboard_rows(portfolio, cash_input)
-if not v64_df.empty:
-    st.dataframe(v64_df, use_container_width=True, hide_index=True)
-
-st.subheader("🏆 持股績效排名")
-perf_df = portfolio_performance_rows(portfolio, fee_discount)
-if not perf_df.empty:
-    st.dataframe(perf_df, use_container_width=True, hide_index=True)
-else:
-    st.info("目前沒有持股資料可排序。")
-
-st.subheader("🚨 成本價警示")
-warn_df = cost_warning_rows(portfolio)
-if not warn_df.empty:
-    st.dataframe(warn_df, use_container_width=True, hide_index=True)
-
-st.divider()
-
-
-# AI 市場
-st.subheader("🤖 AI / 半導體市場儀表板")
-st.markdown('<div class="section-note">強化版：台積電ADR、輝達、費半、NASDAQ為正向；美債10Y、VIX、DXY上升為壓力。</div>', unsafe_allow_html=True)
-
-cols = st.columns(len(ai_market_list))
-
-for i, (name, ticker) in enumerate(ai_market_list.items()):
-    latest, pct = get_latest_pct(ticker)
-    cols[i].markdown(market_card(name, "N/A" if latest is None else f"{latest:.2f}", pct), unsafe_allow_html=True)
-
-st.metric("AI市場溫度", f"{ai_score} 分")
-st.info(ai_temperature_comment(ai_score))
-
-st.divider()
-
-# 鋼鐵 / 原物料
-st.subheader("🏗️ 鋼鐵 / 原物料儀表板")
-st.markdown('<div class="section-note">強化版：熱軋鋼、鋁價、銅價偏正向；鐵礦砂上漲雖代表需求，但也可能推升成本。</div>', unsafe_allow_html=True)
-
-cols = st.columns(len(commodity_list))
-
-for i, (name, ticker) in enumerate(commodity_list.items()):
-    latest, pct = get_latest_pct(ticker)
-    cols[i].markdown(market_card(name, "N/A" if latest is None else f"{latest:.2f}", pct), unsafe_allow_html=True)
-
-st.metric("鋼鐵市場溫度", f"{steel_score} 分")
-st.info(steel_temperature_comment(steel_score))
-
-st.divider()
-
-# 法人籌碼
-st.subheader("📊 法人籌碼中心：5日 / 20日趨勢")
-chip_df = pd.DataFrame(chip_rows)
-st.dataframe(chip_df, use_container_width=True, hide_index=True)
-
-st.subheader("📈 法人連買天數")
-consecutive_rows = []
-
-for stock_name in stock_list:
-    foreign_days = calc_consecutive_buy_days(
-        stock_name,
-        ["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"]
-    )
-    trust_days = calc_consecutive_buy_days(
-        stock_name,
-        ["投信", "Investment", "Investment_Trust"]
-    )
-
-    if foreign_days >= 5 or trust_days >= 5:
-        signal = "🟢 籌碼偏多"
-    elif foreign_days >= 2 or trust_days >= 2:
-        signal = "🔵 籌碼轉強觀察"
-    else:
-        signal = "🟡 尚未連續買超"
-
-    consecutive_rows.append({
-        "股票": stock_name,
-        "外資連買": f"{foreign_days} 天",
-        "投信連買": f"{trust_days} 天",
-        "籌碼燈號": signal,
-    })
-
-consecutive_df = pd.DataFrame(consecutive_rows)
-st.dataframe(consecutive_df, use_container_width=True, hide_index=True)
-
-st.divider()
-
-st.subheader("🌙 台積電 ADR / 美股隔日提示")
-adr_info = adr_prediction_text()
-st.markdown(f"""
-<div class="alert-card">
-<b>{adr_info['判斷']}</b><br>
-依據：{adr_info['依據']}<br>
-建議：{adr_info['建議']}
-</div>
-""", unsafe_allow_html=True)
-
-st.divider()
-
-# 高檔風險雷達
-st.subheader("🚦 高檔風險雷達")
-
-risk_rows = []
-
-for stock_name, ticker in stock_list.items():
-    df = get_data(ticker, "1y")
-    if df.empty or len(df) < 120:
-        continue
-
-    close = df.iloc[-1]["Close"]
-    distance, risk_level = risk_distance_from_ma(df)
-
-    risk_rows.append({
-        "股票": stock_name,
-        "現價": round(close, 2),
-        "距離半年線": "N/A" if distance is None else f"{distance:+.2f}%",
-        "風險判斷": risk_level,
-    })
-
-risk_df = pd.DataFrame(risk_rows)
-st.dataframe(risk_df, use_container_width=True, hide_index=True)
-
-st.divider()
-
-# 新聞
-st.subheader("📰 今日個股新聞摘要")
-
-for name, info in news_targets.items():
-    st.markdown(f"### {name}")
-
-    ticker = info["ticker"]
-    keyword = info["keyword"]
-
-    if ticker.endswith(".TW"):
-        news_rows = get_google_news(keyword, limit=3)
-    else:
-        news_rows = get_yahoo_news(ticker, limit=3)
-        if not news_rows:
-            news_rows = get_google_news(keyword, limit=3)
-
-    if not news_rows:
-        st.info("目前沒有抓到新聞。")
-        continue
-
-    for news in news_rows:
-        sentiment = news_sentiment(news["標題"])
-        link = news["連結"]
-
-        if link:
-            st.markdown(f"**{sentiment}｜{news['標題']}**  \n來源：{news['來源']}  \n[閱讀新聞]({link})")
-        else:
-            st.markdown(f"**{sentiment}｜{news['標題']}**  \n來源：{news['來源']}")
-
-st.divider()
-
-
-st.subheader("🎯 V7.1 個人加碼地圖")
-
-map_rows = []
-for stock_name, ticker in stock_list.items():
-    df_tmp = get_data(ticker, "1y")
-    if not df_tmp.empty:
-        current_price = float(df_tmp.iloc[-1]["Close"])
-        signal, diff_pct = calc_add_map(stock_name, current_price)
-        map_rows.append({
-            "股票": stock_name,
-            "現價": round(current_price,2),
-            "加碼價": long_term_rules[stock_name]["add"],
-            "距離加碼區(%)": diff_pct,
-            "燈號": signal
-        })
-
-if map_rows:
-    st.dataframe(pd.DataFrame(map_rows), use_container_width=True, hide_index=True)
-
-steel_score_v61, steel_msg = steel_stock_score()
-
-st.subheader("🏭 大成鋼 / 中鋼 溫度中心")
-c1,c2 = st.columns(2)
-c1.metric("鋼鐵溫度", f"{steel_score_v61} 分")
-c2.metric("景氣燈號", steel_msg)
-
-st.divider()
-
-
-# 長線投資儀表板
-st.subheader("🎯 長線投資儀表板")
-
-long_rows = []
-
-for stock_name, ticker in stock_list.items():
-    df = get_data(ticker, "1y")
-    if df.empty or len(df) < 120:
-        continue
-
-    current = df.iloc[-1]["Close"]
-    rule = long_term_rules[stock_name]
-    advice, icon = stock_long_term_advice(stock_name, current)
-    score = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
-
-    add_gap = (current - rule["add"]) / current * 100
-    reduce_gap = (rule["reduce"] - current) / current * 100
-    _, risk_level = risk_distance_from_ma(df)
-
-    if score >= 80:
-        action = "🟢 可續抱，拉回分批"
-    elif score >= 60:
-        action = "🔵 續抱觀察"
-    elif score >= 45:
-        action = "🟡 停止加碼"
-    else:
-        action = "🔴 風險偏高，評估減碼"
-
-    long_rows.append({
-        "股票": stock_name,
-        "現價": round(current, 2),
-        "加碼價": rule["add"],
-        "強力加碼價": rule["strong_add"],
-        "減碼價": rule["reduce"],
-        "距離加碼": f"{add_gap:.2f}%",
-        "距離減碼": f"{reduce_gap:.2f}%",
-        "評分": health_display(score),
-        "加碼紅綠燈": add_reduce_light(stock_name, current, score, risk_level),
-        "區間建議": f"{icon} {advice}",
-        "操作建議": action,
-        "高檔風險": risk_level,
-    })
-
-long_df = pd.DataFrame(long_rows)
-st.dataframe(long_df, use_container_width=True, hide_index=True)
-
-st.divider()
-
-# 新資金配置
-st.subheader("💵 新資金配置建議")
-allocation_df = allocation_suggestion(cash_input, ai_score, steel_score)
-st.dataframe(allocation_df, use_container_width=True, hide_index=True)
-
-st.divider()
-
-# 持股追蹤
-
-st.divider()
-st.subheader("❤️ 持股健康度評分")
-st.markdown("""
-<div style="
-    background:#f8fafc;
-    border-left:6px solid #60a5fa;
-    padding:12px 16px;
-    border-radius:10px;
-    margin:8px 0 18px 0;
-    font-size:20px;
-    line-height:1.6;
-">
-<b>健康度說明：</b>
-🟢 90以上 優秀　
-🔵 75~89 良好　
-🟡 60~74 普通　
-🔴 60以下 偏弱
-</div>
-""", unsafe_allow_html=True)
-
-health_rows = []
-for stock_name, ticker in stock_list.items():
-    df_h = get_data(ticker, "1y")
-    if not df_h.empty:
-        score_h = score_stock(stock_name, df_h, ai_score, steel_score, chip_score_map.get(stock_name,0))
-        if score_h >= 85:
-            level = "🟢 優秀"
-        elif score_h >= 70:
-            level = "🔵 良好"
-        elif score_h >= 55:
-            level = "🟡 普通"
-        else:
-            level = "🔴 偏弱"
-
-        health_rows.append({
-            "股票": stock_name,
-            "健康度": health_display(score_h),
-            "評級": level
-        })
-
-if health_rows:
-    st.dataframe(pd.DataFrame(health_rows), use_container_width=True, hide_index=True)
-
-
-st.subheader("💰 持股追蹤")
-
-portfolio_rows = []
-total_cost = 0
-total_value = 0
-total_profit = 0
-
-for stock_name, info in portfolio.items():
-    df = get_data(stock_list[stock_name], "5d")
-    if df.empty or len(df) < 2:
-        continue
-
-    current = df.iloc[-1]["Close"]
-
-    buy_amount, sell_amount, net_profit, net_profit_pct = calc_net_profit(
-        info["shares"], info["cost"], current, fee_discount
-    )
-
-    total_cost += buy_amount
-    total_value += sell_amount
-    total_profit += net_profit
-
-    portfolio_rows.append({
-        "股票": stock_name,
-        "股數": info["shares"],
-        "成本": info["cost"],
-        "現價": round(current, 2),
-        "已扣費損益": colored_text(round(net_profit)),
-        "報酬率": colored_text(round(net_profit_pct, 2), "%"),
-    })
-
-total_profit_pct = total_profit / total_cost * 100 if total_cost else 0
-
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("投入成本", f"{total_cost:,.0f}")
-c2.metric("目前市值", f"{total_value:,.0f}")
-c3.markdown(f'<div>已扣費總損益</div><div class="big-profit {tw_color(total_profit)}-text">{total_profit:,.0f}</div>', unsafe_allow_html=True)
-c4.markdown(f'<div>已扣費報酬率</div><div class="big-profit {tw_color(total_profit_pct)}-text">{total_profit_pct:.2f}%</div>', unsafe_allow_html=True)
-
-portfolio_df = pd.DataFrame(portfolio_rows)
-if not portfolio_df.empty:
-    st.markdown(portfolio_df.to_html(escape=False, index=False), unsafe_allow_html=True)
-
-st.divider()
-
-
-st.subheader("🩺 V7.1 個股診斷中心")
-
-diag_stock = st.selectbox("選擇要診斷的股票", list(stock_list.keys()), key="diag_stock")
-diag = stock_diagnosis(diag_stock, stock_list[diag_stock], ai_score, steel_score, chip_score_map)
-
-if diag:
-    d1, d2, d3, d4 = st.columns(4)
-    d1.metric("現價", diag["現價"])
-    d2.metric("健康度", diag["健康度"])
-    d3.metric("趨勢", diag["趨勢"])
-    d4.metric("操作建議", diag["操作建議"])
-
-    st.markdown(f"""
-<div class="alert-card">
-<b>{diag['股票']} 診斷結果</b><br>
-買點狀態：{diag['買點狀態']}<br>
-高檔風險：{diag['高檔風險']}<br>
-產業環境：{diag['產業環境']}<br>
-原因：{diag['原因']}
-</div>
-""", unsafe_allow_html=True)
-
-st.divider()
-
-
-# 單檔股票分析
-st.subheader("📊 單檔股票分析")
-
-selected_stock = st.sidebar.selectbox("選擇股票", list(stock_list.keys()))
-period = st.sidebar.selectbox("期間", ["1mo", "2mo", "3mo", "6mo", "1y", "2y"], index=4)
-
-df = get_data(stock_list[selected_stock], period)
-
-min_required = 15 if period in ["1mo", "2mo"] else 30
-
-if df.empty or len(df) < min_required:
-    st.warning("資料不足，請改選較長期間。")
-else:
-    latest = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    change = latest["Close"] - prev["Close"]
-    change_pct = change / prev["Close"] * 100
-
-    support, resistance = calc_support_resistance(df)
-
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
-    col1.metric("股票", selected_stock)
-    col2.metric("收盤價", f"{latest['Close']:.2f}")
-    col3.markdown(f'<div>漲跌</div><div class="big-profit {tw_color(change)}-text">{change:+.2f}</div>', unsafe_allow_html=True)
-    col4.markdown(f'<div>漲跌幅</div><div class="big-profit {tw_color(change_pct)}-text">{change_pct:+.2f}%</div>', unsafe_allow_html=True)
-    col5.metric("近期支撐", f"{support:.2f}")
-    col6.metric("近期壓力", f"{resistance:.2f}")
-
-    df["MA5"] = df["Close"].rolling(5).mean()
-    df["MA20"] = df["Close"].rolling(20).mean()
-    df["MA60"] = df["Close"].rolling(60).mean()
-    df["MA120"] = df["Close"].rolling(120).mean()
-    df["MA240"] = df["Close"].rolling(240).mean()
-
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.76, 0.24])
-
-    fig.add_trace(
-        go.Candlestick(
-            x=df.index,
-            open=df["Open"],
-            high=df["High"],
-            low=df["Low"],
-            close=df["Close"],
-            increasing_line_color="red",
-            decreasing_line_color="green",
-            increasing_fillcolor="red",
-            decreasing_fillcolor="green",
-            name="K線",
-        ),
-        row=1,
-        col=1,
-    )
-
-    ma_settings = [
-        ("MA5", "yellow"),
-        ("MA20", "white"),
-        ("MA60", "cyan"),
-        ("MA120", "orange"),
-        ("MA240", "magenta"),
-    ]
-
-    for ma, color in ma_settings:
-        if df[ma].notna().sum() > 0:
-            fig.add_trace(go.Scatter(x=df.index, y=df[ma], name=ma, line=dict(color=color, width=2)), row=1, col=1)
-
-    fig.add_hline(y=support, line_dash="dash", line_color="green", row=1, col=1)
-    fig.add_hline(y=resistance, line_dash="dash", line_color="red", row=1, col=1)
-    fig.add_hline(y=latest["Close"], line_dash="dot", line_color="white", row=1, col=1)
-
-    volume_colors = ["red" if c >= o else "green" for c, o in zip(df["Close"], df["Open"])]
-
-    fig.add_trace(go.Bar(x=df.index, y=df["Volume"] / 1000, name="成交量(張)", marker_color=volume_colors, opacity=0.65), row=2, col=1)
-
-    fig.update_layout(
-        height=620,
-        template="plotly_dark",
-        xaxis_rangeslider_visible=False,
-        hovermode="x unified",
-        font=dict(size=18),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=30, r=50, t=45, b=30),
-    )
-
-    fig.update_yaxes(title_text="股價", row=1, col=1)
-    fig.update_yaxes(title_text="成交量(張)", row=2, col=1)
-
-    st.plotly_chart(fig, use_container_width=True)
