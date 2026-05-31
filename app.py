@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V9.0 Professional Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V9.0 Fix Professional Edition Fix", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1449,7 +1449,7 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
 def format_line_alert_message(alert_df, ai_score, steel_score):
     now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
     lines = [
-        f"Hsing 投資儀表板 V9.0 Professional Edition 預警｜{now_text}",
+        f"Hsing 投資儀表板 V9.0 Professional Edition Fix 預警｜{now_text}",
         f"AI溫度：{ai_score} 分｜鋼鐵溫度：{steel_score} 分",
         "",
     ]
@@ -1504,7 +1504,7 @@ def allocation_suggestion(cash, ai_score, steel_score):
 # 主畫面：V7.2 精簡版
 # =====================================================
 
-st.title("🚀 Hsing 投資儀表板 V9.0 Professional Edition 專業投資決策版")
+st.title("🚀 Hsing 投資儀表板 V9.0 Professional Edition Fix 專業投資決策版")
 
 st.markdown("""
 <div class="print-note">
@@ -1933,7 +1933,16 @@ with tab_chart:
         fig.add_trace(go.Scatter(x=df.index, y=df["Signal"], name="Signal", line=dict(color="#60a5fa", width=2)), row=6, col=1)
 
         visible = min(120, len(df))
-        fig.update_xaxes(range=[df.index[-visible], df.index[-1]])
+        start_idx = max(0, len(df) - visible)
+        padding_days = 5
+
+        # V9.0 Fix：左右保留空白，避免第一根/最後一根K線與成交量被切掉
+        fig.update_xaxes(
+            range=[
+                df.index[start_idx] - pd.Timedelta(days=padding_days),
+                df.index[-1] + pd.Timedelta(days=padding_days)
+            ]
+        )
         fig.update_layout(
             height=1450,
             template="plotly_white",
