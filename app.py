@@ -425,6 +425,108 @@ def summarize_institutional(stock_name):
     }
 
 
+def calc_consecutive_buy_days(stock_name, investor_keywords):
+    stock_id = stock_id_map[stock_name]
+    df = get_institutional_data(stock_id, days=40)
+
+    if df.empty:
+        return 0
+
+    def day_net(day_df):
+        mask = pd.Series(False, index=day_df.index)
+        for keyword in investor_keywords:
+            mask = mask | day_df["name"].astype(str).str.contains(keyword, case=False, na=False)
+        sub = day_df[mask]
+        if sub.empty:
+            return 0
+        return sub["net"].sum()
+
+    count = 0
+    for date in sorted(df["date"].unique(), reverse=True):
+        daily = df[df["date"] == date]
+        net = day_net(daily)
+        if net > 0:
+            count += 1
+        else:
+            break
+
+    return count
+
+
+def adr_prediction_text():
+    tsm_price, tsm_pct = get_latest_pct("TSM")
+    sox_price, sox_pct = get_latest_pct("^SOX")
+    nvda_price, nvda_pct = get_latest_pct("NVDA")
+    vix_price, vix_pct = get_latest_pct("^VIX")
+    tnx_price, tnx_pct = get_latest_pct("^TNX")
+
+    score = 0
+    details = []
+
+    if tsm_pct is not None:
+        score += 2 if tsm_pct > 1 else 1 if tsm_pct > 0 else -1 if tsm_pct > -1 else -2
+        details.append(f"台積電ADR {tsm_pct:+.2f}%")
+
+    if sox_pct is not None:
+        score += 2 if sox_pct > 1 else 1 if sox_pct > 0 else -1 if sox_pct > -1 else -2
+        details.append(f"費半 {sox_pct:+.2f}%")
+
+    if nvda_pct is not None:
+        score += 1 if nvda_pct > 0 else -1
+        details.append(f"輝達 {nvda_pct:+.2f}%")
+
+    if vix_pct is not None:
+        score += 1 if vix_pct < 0 else -1
+        details.append(f"VIX {vix_pct:+.2f}%")
+
+    if tnx_pct is not None:
+        score += 1 if tnx_pct < 0 else -1
+        details.append(f"美債10Y {tnx_pct:+.2f}%")
+
+    if score >= 4:
+        direction = "🟢 明日 AI / 半導體偏多"
+        suggestion = "台積電、廣達、鴻海可續抱；若開高太多，仍不建議追高。"
+    elif score >= 1:
+        direction = "🔵 明日 AI / 半導體中性偏多"
+        suggestion = "可續抱，觀察台積電是否站穩短均線。"
+    elif score <= -3:
+        direction = "🔴 明日 AI / 半導體偏弱"
+        suggestion = "停止追價，等待拉回到支撐或加碼區。"
+    else:
+        direction = "🟡 明日 AI / 半導體中性"
+        suggestion = "以個股支撐、法人籌碼與成交量為主。"
+
+    return {
+        "判斷": direction,
+        "依據": "｜".join(details),
+        "建議": suggestion,
+    }
+
+
+def add_reduce_light(stock_name, current_price, score, risk_text):
+    rule = long_term_rules[stock_name]
+
+    if current_price <= rule["strong_add"]:
+        return "🟢 強力加碼"
+    if current_price <= rule["add"]:
+        return "🟢 分批加碼"
+
+    if "過熱" in risk_text:
+        return "🔴 停止加碼 / 可小幅減碼"
+
+    if current_price >= rule["reduce"]:
+        return "🟡 接近減碼區"
+
+    if score >= 80:
+        return "🔵 續抱，不追高"
+    if score >= 60:
+        return "🔵 續抱觀察"
+    if score >= 45:
+        return "🟡 暫停加碼"
+    return "🔴 風險偏高"
+
+
+
 @st.cache_data(ttl=3600)
 def get_yahoo_news(ticker, limit=3):
     rows = []
@@ -598,7 +700,7 @@ saved_portfolio = load_portfolio()
 with st.sidebar:
     st.header("⚙️ 持股設定")
 
-    fee_discount = st.number_input("元大手續費折扣", min_value=0.1, max_value=1.0, value=0.52, step=0.01)
+    fee_discount = st.number_input("元大手續費折扣", min_value=0.52, max_value=1.0, value=0.52, step=0.01)
     cash_input = st.number_input("本月可投入資金", min_value=0, value=30000, step=1000)
 
     portfolio = {}
@@ -673,6 +775,48 @@ st.divider()
 st.subheader("📊 法人籌碼中心：5日 / 20日趨勢")
 chip_df = pd.DataFrame(chip_rows)
 st.dataframe(chip_df, use_container_width=True, hide_index=True)
+
+st.subheader("📈 法人連買天數")
+consecutive_rows = []
+
+for stock_name in stock_list:
+    foreign_days = calc_consecutive_buy_days(
+        stock_name,
+        ["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"]
+    )
+    trust_days = calc_consecutive_buy_days(
+        stock_name,
+        ["投信", "Investment", "Investment_Trust"]
+    )
+
+    if foreign_days >= 5 or trust_days >= 5:
+        signal = "🟢 籌碼偏多"
+    elif foreign_days >= 2 or trust_days >= 2:
+        signal = "🔵 籌碼轉強觀察"
+    else:
+        signal = "🟡 尚未連續買超"
+
+    consecutive_rows.append({
+        "股票": stock_name,
+        "外資連買": f"{foreign_days} 天",
+        "投信連買": f"{trust_days} 天",
+        "籌碼燈號": signal,
+    })
+
+consecutive_df = pd.DataFrame(consecutive_rows)
+st.dataframe(consecutive_df, use_container_width=True, hide_index=True)
+
+st.divider()
+
+st.subheader("🌙 台積電 ADR / 美股隔日提示")
+adr_info = adr_prediction_text()
+st.markdown(f"""
+<div class="alert-card">
+<b>{adr_info['判斷']}</b><br>
+依據：{adr_info['依據']}<br>
+建議：{adr_info['建議']}
+</div>
+""", unsafe_allow_html=True)
 
 st.divider()
 
@@ -769,6 +913,7 @@ for stock_name, ticker in stock_list.items():
         "距離加碼": f"{add_gap:.2f}%",
         "距離減碼": f"{reduce_gap:.2f}%",
         "評分": score,
+        "加碼紅綠燈": add_reduce_light(stock_name, current, score, risk_level),
         "區間建議": f"{icon} {advice}",
         "操作建議": action,
         "高檔風險": risk_level,
@@ -840,7 +985,9 @@ period = st.sidebar.selectbox("期間", ["1mo", "2mo", "3mo", "6mo", "1y", "2y"]
 
 df = get_data(stock_list[selected_stock], period)
 
-if df.empty or len(df) < 20:
+min_required = 15 if period in ["1mo", "2mo"] else 30
+
+if df.empty or len(df) < min_required:
     st.warning("資料不足，請改選較長期間。")
 else:
     latest = df.iloc[-1]
