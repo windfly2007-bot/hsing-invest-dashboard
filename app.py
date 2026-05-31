@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V7.1", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V8.0 Full", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1439,7 +1439,7 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
 def format_line_alert_message(alert_df, ai_score, steel_score):
     now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
     lines = [
-        f"Hsing 投資儀表板 V7.1 預警｜{now_text}",
+        f"Hsing 投資儀表板 V8.0 Full 預警｜{now_text}",
         f"AI溫度：{ai_score} 分｜鋼鐵溫度：{steel_score} 分",
         "",
     ]
@@ -1494,7 +1494,7 @@ def allocation_suggestion(cash, ai_score, steel_score):
 # 主畫面：V7.2 精簡版
 # =====================================================
 
-st.title("🧭 Hsing 投資儀表板 V7.2 精簡決策版")
+st.title("🚀 Hsing 投資儀表板 V8.0 Full 專業投資決策版")
 
 st.markdown("""
 <div class="print-note">
