@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V6.0", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V6.1", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -653,6 +653,30 @@ def generate_alerts(ai_score, steel_score, chip_score_map):
     return alerts
 
 
+
+def calc_add_map(stock_name, current_price):
+    add_price = long_term_rules[stock_name]["add"]
+    diff_pct = (current_price - add_price) / current_price * 100
+
+    if current_price <= add_price:
+        signal = "🟢 已進入加碼區"
+    elif diff_pct <= 5:
+        signal = "🟡 接近加碼區"
+    else:
+        signal = "🔴 距離較遠"
+
+    return signal, round(diff_pct, 2)
+
+def steel_stock_score():
+    score = steel_temperature()
+    if score >= 75:
+        return score, "🟢 偏多"
+    elif score >= 55:
+        return score, "🔵 中性偏多"
+    elif score >= 40:
+        return score, "🟡 中性"
+    return score, "🔴 偏弱"
+
 def allocation_suggestion(cash, ai_score, steel_score):
     weights = {
         "台積電": 0.45,
@@ -693,7 +717,7 @@ def allocation_suggestion(cash, ai_score, steel_score):
 # 主畫面
 # =====================================================
 
-st.title("🚀 Hsing 投資儀表板 V6.0")
+st.title("🚀 Hsing 投資儀表板 V6.1")
 
 st.info("""
 V6.0 新增功能：
@@ -886,6 +910,36 @@ for name, info in news_targets.items():
             st.markdown(f"**{sentiment}｜{news['標題']}**  \n來源：{news['來源']}")
 
 st.divider()
+
+
+st.subheader("🎯 V6.1 個人加碼地圖")
+
+map_rows = []
+for stock_name, ticker in stock_list.items():
+    df_tmp = get_data(ticker, "1y")
+    if not df_tmp.empty:
+        current_price = float(df_tmp.iloc[-1]["Close"])
+        signal, diff_pct = calc_add_map(stock_name, current_price)
+        map_rows.append({
+            "股票": stock_name,
+            "現價": round(current_price,2),
+            "加碼價": long_term_rules[stock_name]["add"],
+            "距離加碼區(%)": diff_pct,
+            "燈號": signal
+        })
+
+if map_rows:
+    st.dataframe(pd.DataFrame(map_rows), use_container_width=True, hide_index=True)
+
+steel_score_v61, steel_msg = steel_stock_score()
+
+st.subheader("🏭 大成鋼 / 中鋼 溫度中心")
+c1,c2 = st.columns(2)
+c1.metric("鋼鐵溫度", f"{steel_score_v61} 分")
+c2.metric("景氣燈號", steel_msg)
+
+st.divider()
+
 
 # 長線投資儀表板
 st.subheader("🎯 長線投資儀表板")
