@@ -1590,20 +1590,248 @@ if not perf_df.empty:
 # 分頁細節
 # =====================================================
 
-tab_overview, tab_chart, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
+tab_overview, tab_chart, tab_institution, tab_ai, tab_portfolio = st.tabs([
     "📊 投資總覽",
     "📈 K線中心",
     "🏦 法人中心",
-    "📰 新聞中心",
     "🤖 AI診斷中心",
     "💰 持股中心",
 ])
 
 with tab_overview:
     st.subheader("📊 投資總覽 / 今日預警")
+    st.info(line_msg)
     st.dataframe(alert_df, use_container_width=True, hide_index=True)
 
-    
+    st.caption("LINE Notify 已於 2025/03/31 結束服務；本版使用 LINE Messaging API。未設定 Token 時，只會在儀表板顯示預警，不會推播。")
+
+    col_send, col_auto = st.columns([1, 2])
+    with col_send:
+        if st.button("📲 手動發送 LINE 預警", disabled=not line_ready):
+            msg = format_line_alert_message(alert_df, ai_score, steel_score)
+            ok, result = send_line_message(msg)
+            if ok:
+                st.success(result)
+            else:
+                st.error(result)
+
+    with col_auto:
+        auto_send = st.checkbox("今天開啟後自動發送一次", value=False)
+
+    today_key = datetime.now().strftime("%Y-%m-%d")
+    session_key = f"line_alert_sent_{today_key}"
+
+    if auto_send and line_ready and not st.session_state.get(session_key, False):
+        msg = format_line_alert_message(alert_df, ai_score, steel_score)
+        ok, result = send_line_message(msg)
+        if ok:
+            st.session_state[session_key] = True
+            st.success("今日 LINE 預警已自動發送一次。")
+        else:
+            st.error(result)
+
+with tab_portfolio:
+    st.subheader("💰 持股追蹤")
+
+    portfolio_rows = []
+    total_cost = 0
+    total_value = 0
+    total_profit = 0
+
+    for stock_name, info in portfolio.items():
+        df_p = get_data(stock_list[stock_name], "5d")
+        if df_p.empty or len(df_p) < 2:
+            continue
+
+        current = float(df_p.iloc[-1]["Close"])
+        buy_amount, sell_amount, net_profit, net_profit_pct = calc_net_profit(
+            info["shares"], info["cost"], current, fee_discount
+        )
+
+        total_cost += buy_amount
+        total_value += sell_amount
+        total_profit += net_profit
+
+        portfolio_rows.append({
+            "股票": stock_name,
+            "股數": info["shares"],
+            "成本": info["cost"],
+            "現價": round(current, 2),
+            "已扣費損益": colored_text(round(net_profit)),
+            "報酬率": colored_text(round(net_profit_pct, 2), "%"),
+        })
+
+    total_profit_pct = total_profit / total_cost * 100 if total_cost else 0
+
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("投入成本", f"{total_cost:,.0f}")
+    p2.metric("目前市值", f"{total_value:,.0f}")
+    p3.markdown(f'<div>已扣費總損益</div><div class="big-profit {tw_color(total_profit)}-text">{total_profit:,.0f}</div>', unsafe_allow_html=True)
+    p4.markdown(f'<div>已扣費報酬率</div><div class="big-profit {tw_color(total_profit_pct)}-text">{total_profit_pct:.2f}%</div>', unsafe_allow_html=True)
+
+    portfolio_df = pd.DataFrame(portfolio_rows)
+    if not portfolio_df.empty:
+        st.markdown(portfolio_df.to_html(escape=False, index=False), unsafe_allow_html=True)
+
+    st.subheader("🏆 持股績效排名")
+    if not perf_df.empty:
+        st.dataframe(perf_df, use_container_width=True, hide_index=True)
+
+    st.subheader("🚨 成本價警示")
+    if not warn_df.empty:
+        st.dataframe(warn_df, use_container_width=True, hide_index=True)
+
+    st.subheader("📦 資產配置雷達")
+    if not alloc_summary.empty:
+        st.dataframe(alloc_summary, use_container_width=True, hide_index=True)
+    st.info(alloc_note)
+
+    st.subheader("💵 股息收入估算")
+    if not div_df.empty:
+        st.dataframe(div_df, use_container_width=True, hide_index=True)
+        st.metric("預估全年股息收入", f"{total_div:,.0f} 元")
+
+    st.subheader("💵 新資金配置建議")
+    allocation_df = allocation_suggestion(cash_input, ai_score, steel_score)
+    st.dataframe(allocation_df, use_container_width=True, hide_index=True)
+
+with tab_institution:
+    st.subheader("🤖 AI / 半導體市場")
+    cols = st.columns(len(ai_market_list))
+    for i, (name, ticker) in enumerate(ai_market_list.items()):
+        latest, pct = get_latest_pct(ticker)
+        cols[i].markdown(market_card(name, "N/A" if latest is None else f"{latest:.2f}", pct), unsafe_allow_html=True)
+    st.metric("AI市場溫度", f"{ai_score} 分")
+    st.info(ai_temperature_comment(ai_score))
+
+    st.subheader("🏗️ 鋼鐵 / 原物料")
+    cols = st.columns(len(commodity_list))
+    for i, (name, ticker) in enumerate(commodity_list.items()):
+        latest, pct = get_latest_pct(ticker)
+        cols[i].markdown(market_card(name, "N/A" if latest is None else f"{latest:.2f}", pct), unsafe_allow_html=True)
+    st.metric("鋼鐵市場溫度", f"{steel_score} 分")
+    st.info(steel_temperature_comment(steel_score))
+
+    st.subheader("🏦 法人籌碼 5日 / 20日")
+    chip_df = pd.DataFrame(chip_rows)
+    st.dataframe(chip_df, use_container_width=True, hide_index=True)
+
+    st.subheader("📈 法人連買天數")
+    consecutive_rows = []
+    for stock_name in stock_list:
+        foreign_days = calc_consecutive_buy_days(
+            stock_name,
+            ["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"]
+        )
+        trust_days = calc_consecutive_buy_days(
+            stock_name,
+            ["投信", "Investment", "Investment_Trust"]
+        )
+        if foreign_days >= 5 or trust_days >= 5:
+            signal = "🟢 籌碼偏多"
+        elif foreign_days >= 2 or trust_days >= 2:
+            signal = "🔵 籌碼轉強觀察"
+        else:
+            signal = "🟡 尚未連續買超"
+
+        consecutive_rows.append({
+            "股票": stock_name,
+            "外資連買": f"{foreign_days} 天",
+            "投信連買": f"{trust_days} 天",
+            "籌碼燈號": signal,
+        })
+
+    st.dataframe(pd.DataFrame(consecutive_rows), use_container_width=True, hide_index=True)
+
+    st.subheader("🏆 法人強度排行榜")
+    rank_df = institutional_strength_rank()
+    st.dataframe(rank_df, use_container_width=True, hide_index=True)
+
+    st.subheader("🌙 台積電 ADR / 美股隔日提示")
+    adr_info = adr_prediction_text()
+    st.markdown(f"""
+    <div class="alert-card">
+    <b>{adr_info['判斷']}</b><br>
+    依據：{adr_info['依據']}<br>
+    建議：{adr_info['建議']}
+    </div>
+    """, unsafe_allow_html=True)
+
+
+with tab_ai:
+    st.subheader("🤖 AI診斷中心")
+
+    diagnosis_rows = []
+    for stock_name, ticker in stock_list.items():
+        df_d = get_data(ticker, "1y")
+        if df_d.empty or len(df_d) < 120:
+            continue
+
+        current = float(df_d.iloc[-1]["Close"])
+        tech_signal, tech_score = technical_signal(stock_name, ticker)
+        chip_score = chip_score_map.get(stock_name, 0)
+        chip_part = max(0, min(30, 15 + chip_score * 3))
+
+        if long_term_rules[stock_name]["type"] == "AI":
+            industry_score = ai_score
+        else:
+            industry_score = steel_score
+        industry_part = int(max(0, min(30, industry_score * 0.3)))
+
+        tech_part = int(max(0, min(40, tech_score * 0.4)))
+        total_score = int(max(0, min(100, tech_part + chip_part + industry_part)))
+
+        distance, risk_text = risk_distance_from_ma(df_d)
+        signal, reason = operation_signal(
+            stock_name,
+            current,
+            total_score,
+            chip_score,
+            risk_text,
+        )
+
+        foreign_days = calc_consecutive_buy_days(
+            stock_name,
+            ["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"]
+        )
+        trust_days = calc_consecutive_buy_days(
+            stock_name,
+            ["投信", "Investment", "Investment_Trust"]
+        )
+
+        if foreign_days >= 3 and trust_days >= 3:
+            resonance = "🟢 法人共振"
+        elif foreign_days >= 3 or trust_days >= 3:
+            resonance = "🔵 單一法人轉強"
+        else:
+            resonance = "🟡 尚未共振"
+
+        diagnosis_rows.append({
+            "股票": stock_name,
+            "現價": round(current, 2),
+            "技術面": f"{tech_part}/40",
+            "籌碼面": f"{chip_part}/30",
+            "產業面": f"{industry_part}/30",
+            "總分": total_score,
+            "AI燈號": signal,
+            "法人共振": resonance,
+            "原因": reason,
+        })
+
+    diagnosis_df = pd.DataFrame(diagnosis_rows)
+    if not diagnosis_df.empty:
+        st.dataframe(diagnosis_df, use_container_width=True, hide_index=True)
+
+        best = diagnosis_df.sort_values("總分", ascending=False).iloc[0]
+        weak = diagnosis_df.sort_values("總分", ascending=True).iloc[0]
+
+        c1, c2 = st.columns(2)
+        c1.success(f"🥇 今日較強：{best['股票']}｜{best['總分']}分｜{best['AI燈號']}")
+        c2.warning(f"⚠️ 需觀察：{weak['股票']}｜{weak['總分']}分｜{weak['AI燈號']}")
+    else:
+        st.info("目前資料不足，無法產生AI診斷。")
+
+
 with tab_chart:
     st.subheader("📈 個股K線分析 V9.0 Professional Edition")
 
