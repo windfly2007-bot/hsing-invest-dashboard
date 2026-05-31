@@ -1590,21 +1590,20 @@ if not perf_df.empty:
 # 分頁細節
 # =====================================================
 
-tab_overview, tab_chart, tab_institution, tab_ai, tab_portfolio = st.tabs([
+tab_overview, tab_chart, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
     "📊 投資總覽",
     "📈 K線中心",
     "🏦 法人中心",
+    "📰 新聞中心",
     "🤖 AI診斷中心",
     "💰 持股中心",
 ])
 
 with tab_overview:
     st.subheader("📊 投資總覽 / 今日預警")
-    st.info(line_msg)
-    st.dataframe(alert_df, use_container_width=True, hide_index=True)
+        st.dataframe(alert_df, use_container_width=True, hide_index=True)
 
-    st.caption("LINE Notify 已於 2025/03/31 結束服務；本版使用 LINE Messaging API。未設定 Token 時，只會在儀表板顯示預警，不會推播。")
-
+    
     col_send, col_auto = st.columns([1, 2])
     with col_send:
         if st.button("📲 手動發送 LINE 預警", disabled=not line_ready):
@@ -1757,6 +1756,13 @@ with tab_institution:
     </div>
     """, unsafe_allow_html=True)
 
+
+with tab_news:
+    st.subheader("📰 新聞中心")
+    st.info("新聞中心已啟用，後續可串接 Yahoo Finance RSS 即時新聞")
+    for stock in ["台積電","鴻海","廣達","大成鋼","中鋼"]:
+        st.markdown(f"### {stock}")
+        st.write("• 新聞功能待串接")
 
 with tab_ai:
     st.subheader("🤖 AI診斷中心")
