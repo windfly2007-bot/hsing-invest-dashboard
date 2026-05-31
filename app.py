@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V6.4", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V6.4a", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -76,10 +76,23 @@ news_targets = {
 
 st.markdown("""
 <style>
-html, body, [class*="css"] { font-size: 19px; }
-.block-container { padding-top: 3.2rem; padding-left: 2rem; padding-right: 2rem; }
-h1 { font-size: 36px !important; font-weight: 900 !important; margin-top: 12px !important; line-height: 1.25 !important; }
-h2, h3 { font-size: 28px !important; font-weight: 800 !important; }
+html, body, [class*="css"] { font-size: 22px; }
+.block-container { padding-top: 3.8rem; padding-left: 2rem; padding-right: 2rem; }
+h1 { font-size: 38px !important; font-weight: 900 !important; margin-top: 16px !important; line-height: 1.3 !important; }
+h2, h3 { font-size: 30px !important; font-weight: 900 !important; }
+
+table, th, td {
+    font-size: 21px !important;
+}
+
+[data-testid="stMetricValue"] {
+    font-size: 34px !important;
+    font-weight: 900 !important;
+}
+
+[data-testid="stDataFrame"] {
+    font-size: 21px !important;
+}
 
 .red-text { color:#ff3333; font-weight:900; }
 .green-text { color:#00bb44; font-weight:900; }
@@ -851,6 +864,25 @@ def stock_diagnosis(stock_name, ticker, ai_score, steel_score, chip_score_map):
 
 
 
+
+def health_display(score):
+    if score >= 90:
+        return f"🟢 {score} 優秀"
+    elif score >= 75:
+        return f"🔵 {score} 良好"
+    elif score >= 60:
+        return f"🟡 {score} 普通"
+    else:
+        return f"🔴 {score} 偏弱"
+
+
+def medal_label(index, stock_name):
+    medals = ["🥇", "🥈", "🥉"]
+    if index < len(medals):
+        return f"{medals[index]} {stock_name}"
+    return stock_name
+
+
 def technical_signal(stock_name, ticker):
     df = get_data(ticker, "1y")
     if df.empty or len(df) < 120:
@@ -931,11 +963,18 @@ def portfolio_performance_rows(portfolio, fee_discount):
             "成本": round(info["cost"], 2),
             "股數": info["shares"],
             "已扣費損益": round(net_profit),
-            "報酬率": round(net_profit_pct, 2),
+            "報酬率數值": net_profit_pct,
             "狀態": "🟢 賺錢" if net_profit > 0 else "🔴 虧損" if net_profit < 0 else "⚪ 打平",
         })
 
-    return pd.DataFrame(rows).sort_values("已扣費損益", ascending=False) if rows else pd.DataFrame()
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows).sort_values("已扣費損益", ascending=False).reset_index(drop=True)
+    df["股票"] = [medal_label(i, name) for i, name in enumerate(df["股票"])]
+    df["報酬率"] = df["報酬率數值"].map(lambda x: f"{x:.2f}%")
+    df = df.drop(columns=["報酬率數值"])
+    return df
 
 
 def cost_warning_rows(portfolio):
@@ -1034,10 +1073,15 @@ def allocation_suggestion(cash, ai_score, steel_score):
 # 主畫面
 # =====================================================
 
-st.title("🚀 Hsing 投資儀表板 V6.4")
+st.title("🚀 Hsing 投資儀表板 V6.4a 豪華版")
 
 st.info("""
-V6.4 Pro 新增功能：
+V6.4a 豪華版新增功能：
+✅ 報酬率顯示百分比
+✅ 健康度顏色強化
+✅ 整體字體放大
+✅ 持股績效前三名獎牌
+✅ 表格可讀性優化
 ✅ 修正標題貼頂顯示
 ✅ 持股績效排名
 ✅ 跌破成本警示
@@ -1110,7 +1154,7 @@ for alert in alerts:
 st.divider()
 
 
-st.subheader("🧭 V6.4 本週策略中心")
+st.subheader("🧭 V6.4a 本週策略中心")
 
 strategy_rows = []
 for stock_name, ticker in stock_list.items():
@@ -1136,7 +1180,7 @@ for stock_name, ticker in stock_list.items():
         "本週建議": strategy_s,
         "理由": reason_s,
         "買點狀態": buy_text_s,
-        "健康度": health_s,
+        "健康度": health_display(health_s),
     })
 
 if strategy_rows:
@@ -1167,7 +1211,7 @@ st.dataframe(rank_df, use_container_width=True, hide_index=True)
 st.divider()
 
 
-st.subheader("🧰 V6.4 持股管理中心")
+st.subheader("🧰 V6.4a 持股管理中心")
 v64_df = v64_dashboard_rows(portfolio, cash_input)
 if not v64_df.empty:
     st.dataframe(v64_df, use_container_width=True, hide_index=True)
@@ -1323,7 +1367,7 @@ for name, info in news_targets.items():
 st.divider()
 
 
-st.subheader("🎯 V6.4 個人加碼地圖")
+st.subheader("🎯 V6.4a 個人加碼地圖")
 
 map_rows = []
 for stock_name, ticker in stock_list.items():
@@ -1388,7 +1432,7 @@ for stock_name, ticker in stock_list.items():
         "減碼價": rule["reduce"],
         "距離加碼": f"{add_gap:.2f}%",
         "距離減碼": f"{reduce_gap:.2f}%",
-        "評分": score,
+        "評分": health_display(score),
         "加碼紅綠燈": add_reduce_light(stock_name, current, score, risk_level),
         "區間建議": f"{icon} {advice}",
         "操作建議": action,
@@ -1411,6 +1455,7 @@ st.divider()
 
 st.divider()
 st.subheader("❤️ 持股健康度評分")
+st.caption("健康度：🟢90以上優秀｜🔵75~89良好｜🟡60~74普通｜🔴60以下偏弱")
 
 health_rows = []
 for stock_name, ticker in stock_list.items():
@@ -1428,7 +1473,7 @@ for stock_name, ticker in stock_list.items():
 
         health_rows.append({
             "股票": stock_name,
-            "健康度": score_h,
+            "健康度": health_display(score_h),
             "評級": level
         })
 
@@ -1482,7 +1527,7 @@ if not portfolio_df.empty:
 st.divider()
 
 
-st.subheader("🩺 V6.4 個股診斷中心")
+st.subheader("🩺 V6.4a 個股診斷中心")
 
 diag_stock = st.selectbox("選擇要診斷的股票", list(stock_list.keys()), key="diag_stock")
 diag = stock_diagnosis(diag_stock, stock_list[diag_stock], ai_score, steel_score, chip_score_map)
