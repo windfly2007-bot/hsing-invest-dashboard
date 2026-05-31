@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V6.1", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V6.2", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -717,9 +717,14 @@ def allocation_suggestion(cash, ai_score, steel_score):
 # 主畫面
 # =====================================================
 
-st.title("🚀 Hsing 投資儀表板 V6.1")
+st.title("🚀 Hsing 投資儀表板 V6.2")
 
 st.info("""
+V6.2新增功能：
+✅ 買點雷達
+✅ ADR開盤預估
+✅ 持股健康度
+
 V6.0 新增功能：
 ✅ 外資/投信連買天數
 ✅ ADR隔日提示
@@ -912,7 +917,7 @@ for name, info in news_targets.items():
 st.divider()
 
 
-st.subheader("🎯 V6.1 個人加碼地圖")
+st.subheader("🎯 V6.2 個人加碼地圖")
 
 map_rows = []
 for stock_name, ticker in stock_list.items():
@@ -997,6 +1002,34 @@ st.dataframe(allocation_df, use_container_width=True, hide_index=True)
 st.divider()
 
 # 持股追蹤
+
+st.divider()
+st.subheader("❤️ 持股健康度評分")
+
+health_rows = []
+for stock_name, ticker in stock_list.items():
+    df_h = get_data(ticker, "1y")
+    if not df_h.empty:
+        score_h = score_stock(stock_name, df_h, ai_score, steel_score, chip_score_map.get(stock_name,0))
+        if score_h >= 85:
+            level = "🟢 優秀"
+        elif score_h >= 70:
+            level = "🔵 良好"
+        elif score_h >= 55:
+            level = "🟡 普通"
+        else:
+            level = "🔴 偏弱"
+
+        health_rows.append({
+            "股票": stock_name,
+            "健康度": score_h,
+            "評級": level
+        })
+
+if health_rows:
+    st.dataframe(pd.DataFrame(health_rows), use_container_width=True, hide_index=True)
+
+
 st.subheader("💰 持股追蹤")
 
 portfolio_rows = []
