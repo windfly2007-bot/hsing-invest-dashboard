@@ -1506,6 +1506,13 @@ def allocation_suggestion(cash, ai_score, steel_score):
 
 st.title("🚀 Hsing 投資儀表板 V9.0 Professional Edition Fix 專業投資決策版")
 
+st.markdown("""
+<div class="print-note">
+<b>V7.2 精簡重點：</b>
+首頁只保留「今日該看什麼、要不要買、持股狀態」。
+詳細資料改放在分頁內，避免列印與瀏覽時內容重複。
+</div>
+""", unsafe_allow_html=True)
 
 saved_portfolio = load_portfolio()
 
@@ -1590,16 +1597,17 @@ if not perf_df.empty:
 # 分頁細節
 # =====================================================
 
-tab_overview, tab_chart, tab_institution, tab_ai, tab_portfolio = st.tabs([
-    "📊 投資總覽",
-    "📈 K線中心",
-    "🏦 法人中心",
-    "🤖 AI診斷中心",
-    "💰 持股中心",
+tab_alert, tab_portfolio, tab_market, tab_news, tab_chart, tab_line = st.tabs([
+    "🚨 預警 / LINE",
+    "💰 持股 / 配置",
+    "📊 市場 / 籌碼",
+    "📰 新聞",
+    "📈 K線",
+    "⚙️ LINE設定",
 ])
 
-with tab_overview:
-    st.subheader("📊 投資總覽 / 今日預警")
+with tab_alert:
+    st.subheader("🚨 自動預警中心")
     st.info(line_msg)
     st.dataframe(alert_df, use_container_width=True, hide_index=True)
 
@@ -1695,7 +1703,7 @@ with tab_portfolio:
     allocation_df = allocation_suggestion(cash_input, ai_score, steel_score)
     st.dataframe(allocation_df, use_container_width=True, hide_index=True)
 
-with tab_institution:
+with tab_market:
     st.subheader("🤖 AI / 半導體市場")
     cols = st.columns(len(ai_market_list))
     for i, (name, ticker) in enumerate(ai_market_list.items()):
@@ -1712,7 +1720,7 @@ with tab_institution:
     st.metric("鋼鐵市場溫度", f"{steel_score} 分")
     st.info(steel_temperature_comment(steel_score))
 
-    st.subheader("🏦 法人籌碼 5日 / 20日")
+    st.subheader("📊 法人籌碼 5日 / 20日")
     chip_df = pd.DataFrame(chip_rows)
     st.dataframe(chip_df, use_container_width=True, hide_index=True)
 
@@ -1757,79 +1765,34 @@ with tab_institution:
     </div>
     """, unsafe_allow_html=True)
 
+with tab_news:
+    st.subheader("📰 今日個股新聞摘要")
 
-with tab_ai:
-    st.subheader("🤖 AI診斷中心")
+    for name, info in news_targets.items():
+        st.markdown(f"### {name}")
+        ticker = info["ticker"]
+        keyword = info["keyword"]
 
-    diagnosis_rows = []
-    for stock_name, ticker in stock_list.items():
-        df_d = get_data(ticker, "1y")
-        if df_d.empty or len(df_d) < 120:
+        if ticker.endswith(".TW"):
+            news_rows = get_google_news(keyword, limit=3)
+        else:
+            news_rows = get_yahoo_news(ticker, limit=3)
+            if not news_rows:
+                news_rows = get_google_news(keyword, limit=3)
+
+        if not news_rows:
+            st.info("目前沒有抓到新聞。")
             continue
 
-        current = float(df_d.iloc[-1]["Close"])
-        tech_signal, tech_score = technical_signal(stock_name, ticker)
-        chip_score = chip_score_map.get(stock_name, 0)
-        chip_part = max(0, min(30, 15 + chip_score * 3))
+        for news in news_rows:
+            sentiment = news_sentiment(news["標題"])
+            link = news["連結"]
 
-        if long_term_rules[stock_name]["type"] == "AI":
-            industry_score = ai_score
-        else:
-            industry_score = steel_score
-        industry_part = int(max(0, min(30, industry_score * 0.3)))
+            if link:
+                st.markdown(f"**{sentiment}｜{news['標題']}**  \n來源：{news['來源']}  \n[閱讀新聞]({link})")
+            else:
+                st.markdown(f"**{sentiment}｜{news['標題']}**  \n來源：{news['來源']}")
 
-        tech_part = int(max(0, min(40, tech_score * 0.4)))
-        total_score = int(max(0, min(100, tech_part + chip_part + industry_part)))
-
-        distance, risk_text = risk_distance_from_ma(df_d)
-        signal, reason = operation_signal(
-            stock_name,
-            current,
-            total_score,
-            chip_score,
-            risk_text,
-        )
-
-        foreign_days = calc_consecutive_buy_days(
-            stock_name,
-            ["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"]
-        )
-        trust_days = calc_consecutive_buy_days(
-            stock_name,
-            ["投信", "Investment", "Investment_Trust"]
-        )
-
-        if foreign_days >= 3 and trust_days >= 3:
-            resonance = "🟢 法人共振"
-        elif foreign_days >= 3 or trust_days >= 3:
-            resonance = "🔵 單一法人轉強"
-        else:
-            resonance = "🟡 尚未共振"
-
-        diagnosis_rows.append({
-            "股票": stock_name,
-            "現價": round(current, 2),
-            "技術面": f"{tech_part}/40",
-            "籌碼面": f"{chip_part}/30",
-            "產業面": f"{industry_part}/30",
-            "總分": total_score,
-            "AI燈號": signal,
-            "法人共振": resonance,
-            "原因": reason,
-        })
-
-    diagnosis_df = pd.DataFrame(diagnosis_rows)
-    if not diagnosis_df.empty:
-        st.dataframe(diagnosis_df, use_container_width=True, hide_index=True)
-
-        best = diagnosis_df.sort_values("總分", ascending=False).iloc[0]
-        weak = diagnosis_df.sort_values("總分", ascending=True).iloc[0]
-
-        c1, c2 = st.columns(2)
-        c1.success(f"🥇 今日較強：{best['股票']}｜{best['總分']}分｜{best['AI燈號']}")
-        c2.warning(f"⚠️ 需觀察：{weak['股票']}｜{weak['總分']}分｜{weak['AI燈號']}")
-    else:
-        st.info("目前資料不足，無法產生AI診斷。")
 
 
 with tab_chart:
@@ -1998,4 +1961,18 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 9.1 Professional')
+with tab_line:
+    st.subheader("⚙️ LINE Messaging API 設定說明")
+    st.markdown("""
+    1. 建立 LINE 官方帳號，並啟用 Messaging API。  
+    2. 到 LINE Developers 取得 **Channel access token**。  
+    3. 取得你的 **User ID** 或 Group ID。  
+    4. 到 Streamlit Cloud → App → Settings → Secrets 加入：
+
+    ```toml
+    LINE_CHANNEL_ACCESS_TOKEN = "你的 Channel access token"
+    LINE_USER_ID = "你的 userId 或 groupId"
+    ```
+
+    儲存後重新部署即可使用 LINE 推播。
+    """)
