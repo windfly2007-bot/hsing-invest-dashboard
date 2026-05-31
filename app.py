@@ -840,7 +840,7 @@ period = st.sidebar.selectbox("期間", ["1mo", "2mo", "3mo", "6mo", "1y", "2y"]
 
 df = get_data(stock_list[selected_stock], period)
 
-if df.empty or len(df) < 30:
+if df.empty or len(df) < 20:
     st.warning("資料不足，請改選較長期間。")
 else:
     latest = df.iloc[-1]
