@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V6.4a-fixed", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V7.0", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1054,6 +1054,222 @@ def v64_dashboard_rows(portfolio, cash_input):
     return pd.DataFrame(rows)
 
 
+
+def fear_greed_index(ai_score, steel_score):
+    score = 50
+
+    _, vix_pct = get_latest_pct("^VIX")
+    _, tnx_pct = get_latest_pct("^TNX")
+    _, dxy_pct = get_latest_pct("DX-Y.NYB")
+    _, tsm_pct = get_latest_pct("TSM")
+    _, sox_pct = get_latest_pct("^SOX")
+
+    if vix_pct is not None:
+        score += 15 if vix_pct < 0 else -15
+    if tnx_pct is not None:
+        score += 10 if tnx_pct < 0 else -10
+    if dxy_pct is not None:
+        score += 8 if dxy_pct < 0 else -8
+    if tsm_pct is not None:
+        score += 12 if tsm_pct > 0 else -12
+    if sox_pct is not None:
+        score += 10 if sox_pct > 0 else -10
+
+    score += (ai_score - 50) * 0.25
+    score += (steel_score - 50) * 0.10
+
+    score = int(max(0, min(100, score)))
+
+    if score >= 75:
+        text = "🟢 偏貪婪：市場偏熱，續抱但不要追高"
+    elif score >= 55:
+        text = "🔵 中性偏多：可續抱，拉回分批"
+    elif score >= 40:
+        text = "🟡 中性偏保守：等支撐，不急買"
+    else:
+        text = "🔴 偏恐慌：短線保守，適合觀察低接區"
+
+    return score, text
+
+
+def operation_signal(stock_name, current_price, health_score, chip_score, risk_text):
+    progress, buy_text = buy_point_progress(stock_name, current_price)
+
+    if "過熱" in risk_text:
+        return "🔴 減碼/停買", "高檔風險偏高"
+
+    if current_price <= long_term_rules[stock_name]["add"] and health_score >= 60:
+        return "🟢 可加碼", "進入加碼區且健康度可接受"
+
+    if progress >= 80 and health_score >= 75:
+        return "🟢 可分批", "接近買點且健康度良好"
+
+    if health_score >= 75 and chip_score >= 0:
+        return "🔵 續抱", "趨勢與籌碼仍穩定"
+
+    if health_score >= 55:
+        return "🟡 觀察", "等拉回或等籌碼轉強"
+
+    return "🔴 保守", "健康度偏弱"
+
+
+def dividend_rows(portfolio):
+    rows = []
+    dividend_map = {
+        "台積電": 24.0,
+        "鴻海": 5.8,
+        "廣達": 9.0,
+        "大成鋼": 1.0,
+        "中鋼": 0.35,
+    }
+
+    total_dividend = 0
+    for stock_name, info in portfolio.items():
+        shares = info["shares"]
+        dps = dividend_map.get(stock_name, 0)
+        expected = shares * dps
+        total_dividend += expected
+
+        rows.append({
+            "股票": stock_name,
+            "預估每股股利": f"{dps:.2f}",
+            "股數": shares,
+            "預估股息收入": round(expected),
+        })
+
+    return pd.DataFrame(rows), round(total_dividend)
+
+
+def allocation_radar_rows(portfolio):
+    rows = []
+    total_value = 0
+    value_map = {}
+
+    for stock_name, info in portfolio.items():
+        df = get_data(stock_list[stock_name], "5d")
+        if df.empty:
+            continue
+
+        current = float(df.iloc[-1]["Close"])
+        value = current * info["shares"]
+        value_map[stock_name] = value
+        total_value += value
+
+    for stock_name, value in value_map.items():
+        stock_type = long_term_rules[stock_name]["type"]
+        category = "AI / 半導體" if stock_type == "AI" else "鋼鐵 / 原物料"
+        pct = value / total_value * 100 if total_value else 0
+        rows.append({
+            "股票": stock_name,
+            "類別": category,
+            "市值": round(value),
+            "配置比例": f"{pct:.1f}%",
+        })
+
+    return pd.DataFrame(rows)
+
+
+def asset_allocation_summary(portfolio):
+    df = allocation_radar_rows(portfolio)
+    if df.empty:
+        return pd.DataFrame(), "目前沒有持股資料。"
+
+    tmp = df.copy()
+    tmp["配置數值"] = tmp["配置比例"].str.replace("%", "", regex=False).astype(float)
+    summary = tmp.groupby("類別", as_index=False)["配置數值"].sum()
+    summary["配置比例"] = summary["配置數值"].map(lambda x: f"{x:.1f}%")
+    summary = summary.drop(columns=["配置數值"])
+
+    ai_pct = 0
+    steel_pct = 0
+    for _, row in summary.iterrows():
+        if row["類別"] == "AI / 半導體":
+            ai_pct = float(row["配置比例"].replace("%", ""))
+        elif row["類別"] == "鋼鐵 / 原物料":
+            steel_pct = float(row["配置比例"].replace("%", ""))
+
+    if ai_pct >= 85:
+        note = "⚠️ AI部位偏高，後續加碼可更謹慎。"
+    elif steel_pct >= 35:
+        note = "⚠️ 鋼鐵部位偏高，需留意景氣循環。"
+    elif ai_pct >= 65:
+        note = "🔵 AI為核心配置，符合目前主軸。"
+    else:
+        note = "🟢 配置相對均衡。"
+
+    return summary, note
+
+
+def ai_investment_summary(portfolio, ai_score, steel_score, chip_score_map):
+    rows = []
+
+    for stock_name, ticker in stock_list.items():
+        df = get_data(ticker, "1y")
+        if df.empty or len(df) < 120:
+            continue
+
+        current = float(df.iloc[-1]["Close"])
+        health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+        _, risk_text = risk_distance_from_ma(df)
+        signal, reason = operation_signal(
+            stock_name,
+            current,
+            health,
+            chip_score_map.get(stock_name, 0),
+            risk_text,
+        )
+        progress, buy_text = buy_point_progress(stock_name, current)
+
+        rows.append({
+            "股票": stock_name,
+            "操作燈號": signal,
+            "主要理由": reason,
+            "買點狀態": buy_text,
+            "健康度": health_display(health),
+        })
+
+    return pd.DataFrame(rows)
+
+
+def watchlist_today(portfolio, ai_score, steel_score, chip_score_map):
+    rows = []
+
+    for stock_name, ticker in stock_list.items():
+        df = get_data(ticker, "1y")
+        if df.empty or len(df) < 120:
+            continue
+
+        current = float(df.iloc[-1]["Close"])
+        health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+        _, risk_text = risk_distance_from_ma(df)
+        progress, buy_text = buy_point_progress(stock_name, current)
+
+        priority = 0
+        if progress >= 80:
+            priority += 3
+        if health >= 75:
+            priority += 2
+        if chip_score_map.get(stock_name, 0) >= 0:
+            priority += 1
+        if "過熱" in risk_text:
+            priority -= 3
+
+        rows.append({
+            "股票": stock_name,
+            "優先度": priority,
+            "觀察重點": buy_text,
+            "健康度": health_display(health),
+            "高檔風險": risk_text,
+        })
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows).sort_values("優先度", ascending=False).reset_index(drop=True)
+    df["排名"] = [medal_label(i, name) for i, name in enumerate(df["股票"])]
+    return df[["排名", "觀察重點", "健康度", "高檔風險"]]
+
+
 def allocation_suggestion(cash, ai_score, steel_score):
     weights = {
         "台積電": 0.45,
@@ -1094,10 +1310,18 @@ def allocation_suggestion(cash, ai_score, steel_score):
 # 主畫面
 # =====================================================
 
-st.title("🚀 Hsing 投資儀表板 V6.4a 豪華版")
+st.title("🤖 Hsing 投資儀表板 V7.0 智能投資管家")
 
 st.info("""
-V6.4a 豪華版新增功能：
+V7.0 智能投資管家新增功能：
+✅ AI投資總結
+✅ 操作燈號中心
+✅ 資產配置雷達
+✅ 台股恐慌貪婪指數
+✅ 除權息 / 股息收入估算
+✅ 今日重點觀察清單
+
+V6.4a 功能：
 ✅ 報酬率顯示百分比
 ✅ 健康度顏色強化
 ✅ 整體字體放大
@@ -1175,7 +1399,63 @@ for alert in alerts:
 st.divider()
 
 
-st.subheader("🧭 V6.4a 本週策略中心")
+st.subheader("🤖 V7.0 AI投資管家總結")
+
+fg_score, fg_text = fear_greed_index(ai_score, steel_score)
+c1, c2, c3 = st.columns(3)
+c1.metric("台股恐慌貪婪指數", f"{fg_score} 分")
+c2.metric("AI市場溫度", f"{ai_score} 分")
+c3.metric("鋼鐵市場溫度", f"{steel_score} 分")
+st.info(fg_text)
+
+summary_df = ai_investment_summary(portfolio, ai_score, steel_score, chip_score_map)
+if not summary_df.empty:
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+st.subheader("🚦 操作燈號中心")
+signal_rows = []
+for stock_name, ticker in stock_list.items():
+    df_sig = get_data(ticker, "1y")
+    if df_sig.empty or len(df_sig) < 120:
+        continue
+
+    current_sig = float(df_sig.iloc[-1]["Close"])
+    health_sig = score_stock(stock_name, df_sig, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+    _, risk_sig = risk_distance_from_ma(df_sig)
+    sig, reason = operation_signal(stock_name, current_sig, health_sig, chip_score_map.get(stock_name, 0), risk_sig)
+
+    signal_rows.append({
+        "股票": stock_name,
+        "燈號": sig,
+        "原因": reason,
+        "現價": round(current_sig, 2),
+        "健康度": health_display(health_sig),
+    })
+
+if signal_rows:
+    st.dataframe(pd.DataFrame(signal_rows), use_container_width=True, hide_index=True)
+
+st.subheader("🎯 今日重點觀察")
+watch_df = watchlist_today(portfolio, ai_score, steel_score, chip_score_map)
+if not watch_df.empty:
+    st.dataframe(watch_df, use_container_width=True, hide_index=True)
+
+st.subheader("📦 資產配置雷達")
+alloc_summary, alloc_note = asset_allocation_summary(portfolio)
+if not alloc_summary.empty:
+    st.dataframe(alloc_summary, use_container_width=True, hide_index=True)
+st.info(alloc_note)
+
+st.subheader("💵 除權息 / 股息收入估算")
+div_df, total_div = dividend_rows(portfolio)
+if not div_df.empty:
+    st.dataframe(div_df, use_container_width=True, hide_index=True)
+    st.metric("預估全年股息收入", f"{total_div:,.0f} 元")
+
+st.divider()
+
+
+st.subheader("🧭 V7.0 本週策略中心")
 
 strategy_rows = []
 for stock_name, ticker in stock_list.items():
@@ -1232,7 +1512,7 @@ st.dataframe(rank_df, use_container_width=True, hide_index=True)
 st.divider()
 
 
-st.subheader("🧰 V6.4a 持股管理中心")
+st.subheader("🧰 V7.0 持股管理中心")
 v64_df = v64_dashboard_rows(portfolio, cash_input)
 if not v64_df.empty:
     st.dataframe(v64_df, use_container_width=True, hide_index=True)
@@ -1388,7 +1668,7 @@ for name, info in news_targets.items():
 st.divider()
 
 
-st.subheader("🎯 V6.4a 個人加碼地圖")
+st.subheader("🎯 V7.0 個人加碼地圖")
 
 map_rows = []
 for stock_name, ticker in stock_list.items():
@@ -1564,7 +1844,7 @@ if not portfolio_df.empty:
 st.divider()
 
 
-st.subheader("🩺 V6.4a 個股診斷中心")
+st.subheader("🩺 V7.0 個股診斷中心")
 
 diag_stock = st.selectbox("選擇要診斷的股票", list(stock_list.keys()), key="diag_stock")
 diag = stock_diagnosis(diag_stock, stock_list[diag_stock], ai_score, steel_score, chip_score_map)
