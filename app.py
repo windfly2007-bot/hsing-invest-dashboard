@@ -598,7 +598,7 @@ saved_portfolio = load_portfolio()
 with st.sidebar:
     st.header("⚙️ 持股設定")
 
-    fee_discount = st.number_input("元大手續費折扣", min_value=0.1, max_value=1.0, value=0.28, step=0.01)
+    fee_discount = st.number_input("元大手續費折扣", min_value=0.1, max_value=1.0, value=0.52, step=0.01)
     cash_input = st.number_input("本月可投入資金", min_value=0, value=30000, step=1000)
 
     portfolio = {}
