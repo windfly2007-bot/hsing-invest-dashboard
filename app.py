@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V6.3", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V6.4", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -77,8 +77,8 @@ news_targets = {
 st.markdown("""
 <style>
 html, body, [class*="css"] { font-size: 19px; }
-.block-container { padding-top: 1.1rem; padding-left: 2rem; padding-right: 2rem; }
-h1 { font-size: 42px !important; font-weight: 900 !important; }
+.block-container { padding-top: 3.2rem; padding-left: 2rem; padding-right: 2rem; }
+h1 { font-size: 36px !important; font-weight: 900 !important; margin-top: 12px !important; line-height: 1.25 !important; }
 h2, h3 { font-size: 28px !important; font-weight: 800 !important; }
 
 .red-text { color:#ff3333; font-weight:900; }
@@ -850,6 +850,150 @@ def stock_diagnosis(stock_name, ticker, ai_score, steel_score, chip_score_map):
     }
 
 
+
+def technical_signal(stock_name, ticker):
+    df = get_data(ticker, "1y")
+    if df.empty or len(df) < 120:
+        return "資料不足", 50
+
+    close = float(df.iloc[-1]["Close"])
+    ma20 = float(df["Close"].rolling(20).mean().iloc[-1])
+    ma60 = float(df["Close"].rolling(60).mean().iloc[-1])
+    ma120 = float(df["Close"].rolling(120).mean().iloc[-1])
+
+    score = 50
+    score += 15 if close > ma20 else -10
+    score += 15 if close > ma60 else -10
+    score += 15 if close > ma120 else -10
+    score += 10 if ma20 > ma60 else -5
+
+    score = int(max(0, min(100, score)))
+
+    if score >= 80:
+        signal = "🟢 多頭"
+    elif score >= 60:
+        signal = "🔵 偏多"
+    elif score >= 45:
+        signal = "🟡 震盪"
+    else:
+        signal = "🔴 偏弱"
+
+    return signal, score
+
+
+def estimate_add_shares(stock_name, cash):
+    df = get_data(stock_list[stock_name], "5d")
+    if df.empty:
+        return 0, 0
+
+    price = float(df.iloc[-1]["Close"])
+    if price <= 0:
+        return 0, 0
+
+    shares = int(cash // price)
+    amount = round(shares * price)
+    return shares, amount
+
+
+def dividend_yield_estimate(stock_name, current_price):
+    # 簡易參考值：可自行依實際配息調整
+    dividend_map = {
+        "台積電": 24.0,
+        "鴻海": 5.8,
+        "廣達": 9.0,
+        "大成鋼": 1.0,
+        "中鋼": 0.35,
+    }
+
+    dividend = dividend_map.get(stock_name, 0)
+    if current_price <= 0:
+        return 0
+
+    return round(dividend / current_price * 100, 2)
+
+
+def portfolio_performance_rows(portfolio, fee_discount):
+    rows = []
+
+    for stock_name, info in portfolio.items():
+        df = get_data(stock_list[stock_name], "5d")
+        if df.empty or len(df) < 2:
+            continue
+
+        current = float(df.iloc[-1]["Close"])
+        buy_amount, sell_amount, net_profit, net_profit_pct = calc_net_profit(
+            info["shares"], info["cost"], current, fee_discount
+        )
+
+        rows.append({
+            "股票": stock_name,
+            "現價": round(current, 2),
+            "成本": round(info["cost"], 2),
+            "股數": info["shares"],
+            "已扣費損益": round(net_profit),
+            "報酬率": round(net_profit_pct, 2),
+            "狀態": "🟢 賺錢" if net_profit > 0 else "🔴 虧損" if net_profit < 0 else "⚪ 打平",
+        })
+
+    return pd.DataFrame(rows).sort_values("已扣費損益", ascending=False) if rows else pd.DataFrame()
+
+
+def cost_warning_rows(portfolio):
+    rows = []
+
+    for stock_name, info in portfolio.items():
+        df = get_data(stock_list[stock_name], "5d")
+        if df.empty:
+            continue
+
+        current = float(df.iloc[-1]["Close"])
+        cost = float(info["cost"])
+        gap_pct = (current - cost) / cost * 100 if cost else 0
+
+        if current < cost:
+            warning = "🔴 跌破成本"
+        elif gap_pct <= 3:
+            warning = "🟡 接近成本"
+        else:
+            warning = "🟢 高於成本"
+
+        rows.append({
+            "股票": stock_name,
+            "現價": round(current, 2),
+            "成本": round(cost, 2),
+            "與成本差距": f"{gap_pct:+.2f}%",
+            "警示": warning,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def v64_dashboard_rows(portfolio, cash_input):
+    rows = []
+
+    for stock_name, ticker in stock_list.items():
+        df = get_data(ticker, "1y")
+        if df.empty:
+            continue
+
+        current = float(df.iloc[-1]["Close"])
+        tech_signal, tech_score = technical_signal(stock_name, ticker)
+        add_shares, add_amount = estimate_add_shares(stock_name, cash_input)
+        div_yield = dividend_yield_estimate(stock_name, current)
+
+        rows.append({
+            "股票": stock_name,
+            "現價": round(current, 2),
+            "技術面": tech_signal,
+            "技術分數": tech_score,
+            "本月可買股數": add_shares,
+            "試算金額": add_amount,
+            "股利殖利率參考": f"{div_yield:.2f}%",
+        })
+
+    return pd.DataFrame(rows)
+
+
 def allocation_suggestion(cash, ai_score, steel_score):
     weights = {
         "台積電": 0.45,
@@ -890,10 +1034,18 @@ def allocation_suggestion(cash, ai_score, steel_score):
 # 主畫面
 # =====================================================
 
-st.title("🚀 Hsing 投資儀表板 V6.3")
+st.title("🚀 Hsing 投資儀表板 V6.4")
 
 st.info("""
-V6.3 Ultimate 新增功能：
+V6.4 Pro 新增功能：
+✅ 修正標題貼頂顯示
+✅ 持股績效排名
+✅ 跌破成本警示
+✅ 加碼股數試算
+✅ 技術面燈號
+✅ 股利殖利率參考
+
+V6.3 功能：
 ✅ 本週策略中心
 ✅ 買點雷達進度條
 ✅ 法人強度排行榜
@@ -958,7 +1110,7 @@ for alert in alerts:
 st.divider()
 
 
-st.subheader("🧭 V6.3 本週策略中心")
+st.subheader("🧭 V6.4 本週策略中心")
 
 strategy_rows = []
 for stock_name, ticker in stock_list.items():
@@ -1013,6 +1165,27 @@ rank_df = institutional_strength_rank()
 st.dataframe(rank_df, use_container_width=True, hide_index=True)
 
 st.divider()
+
+
+st.subheader("🧰 V6.4 持股管理中心")
+v64_df = v64_dashboard_rows(portfolio, cash_input)
+if not v64_df.empty:
+    st.dataframe(v64_df, use_container_width=True, hide_index=True)
+
+st.subheader("🏆 持股績效排名")
+perf_df = portfolio_performance_rows(portfolio, fee_discount)
+if not perf_df.empty:
+    st.dataframe(perf_df, use_container_width=True, hide_index=True)
+else:
+    st.info("目前沒有持股資料可排序。")
+
+st.subheader("🚨 成本價警示")
+warn_df = cost_warning_rows(portfolio)
+if not warn_df.empty:
+    st.dataframe(warn_df, use_container_width=True, hide_index=True)
+
+st.divider()
+
 
 # AI 市場
 st.subheader("🤖 AI / 半導體市場儀表板")
@@ -1150,7 +1323,7 @@ for name, info in news_targets.items():
 st.divider()
 
 
-st.subheader("🎯 V6.3 個人加碼地圖")
+st.subheader("🎯 V6.4 個人加碼地圖")
 
 map_rows = []
 for stock_name, ticker in stock_list.items():
@@ -1309,7 +1482,7 @@ if not portfolio_df.empty:
 st.divider()
 
 
-st.subheader("🩺 V6.3 個股診斷中心")
+st.subheader("🩺 V6.4 個股診斷中心")
 
 diag_stock = st.selectbox("選擇要診斷的股票", list(stock_list.keys()), key="diag_stock")
 diag = stock_diagnosis(diag_stock, stock_list[diag_stock], ai_score, steel_score, chip_score_map)
