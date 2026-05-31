@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V9.2 Smart Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V9.0 Fix Professional Edition Fix", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1544,6 +1544,92 @@ for stock_name in stock_list:
     chip_rows.append(row)
 
 alert_df = build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map)
+line_ready, line_msg = line_config_status()
+
+# 常用資料先算一次
+summary_df = ai_investment_summary(portfolio, ai_score, steel_score, chip_score_map)
+watch_df = watchlist_today(portfolio, ai_score, steel_score, chip_score_map)
+perf_df = portfolio_performance_rows(portfolio, fee_discount)
+warn_df = cost_warning_rows(portfolio)
+alloc_summary, alloc_note = asset_allocation_summary(portfolio)
+div_df, total_div = dividend_rows(portfolio)
+fg_score, fg_text = fear_greed_index(ai_score, steel_score)
+
+# =====================================================
+# 首頁決策區
+# =====================================================
+
+st.subheader("📌 今日決策總覽")
+
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("恐慌貪婪", f"{fg_score} 分")
+c2.metric("AI溫度", f"{ai_score} 分")
+c3.metric("鋼鐵溫度", f"{steel_score} 分")
+c4.metric("預估股息", f"{total_div:,.0f} 元")
+
+st.info(fg_text)
+
+top_alerts = alert_df.head(5) if not alert_df.empty else pd.DataFrame()
+if not top_alerts.empty:
+    st.subheader("🚨 今日重要預警")
+    st.dataframe(top_alerts, use_container_width=True, hide_index=True)
+
+st.subheader("🚦 操作燈號")
+if not summary_df.empty:
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+st.subheader("🎯 今日重點觀察")
+if not watch_df.empty:
+    st.dataframe(watch_df.head(5), use_container_width=True, hide_index=True)
+
+st.subheader("📊 持股概況")
+if not perf_df.empty:
+    st.dataframe(perf_df, use_container_width=True, hide_index=True)
+
+# =====================================================
+# 分頁細節
+# =====================================================
+
+tab_overview, tab_chart, tab_institution, tab_ai, tab_portfolio = st.tabs([
+    "📊 投資總覽",
+    "📈 K線中心",
+    "🏦 法人中心",
+    "🤖 AI診斷中心",
+    "💰 持股中心",
+])
+
+with tab_overview:
+    st.subheader("📊 投資總覽 / 今日預警")
+    st.info(line_msg)
+    st.dataframe(alert_df, use_container_width=True, hide_index=True)
+
+    st.caption("LINE Notify 已於 2025/03/31 結束服務；本版使用 LINE Messaging API。未設定 Token 時，只會在儀表板顯示預警，不會推播。")
+
+    col_send, col_auto = st.columns([1, 2])
+    with col_send:
+        if st.button("📲 手動發送 LINE 預警", disabled=not line_ready):
+            msg = format_line_alert_message(alert_df, ai_score, steel_score)
+            ok, result = send_line_message(msg)
+            if ok:
+                st.success(result)
+            else:
+                st.error(result)
+
+    with col_auto:
+        auto_send = st.checkbox("今天開啟後自動發送一次", value=False)
+
+    today_key = datetime.now().strftime("%Y-%m-%d")
+    session_key = f"line_alert_sent_{today_key}"
+
+    if auto_send and line_ready and not st.session_state.get(session_key, False):
+        msg = format_line_alert_message(alert_df, ai_score, steel_score)
+        ok, result = send_line_message(msg)
+        if ok:
+            st.session_state[session_key] = True
+            st.success("今日 LINE 預警已自動發送一次。")
+        else:
+            st.error(result)
+
 with tab_portfolio:
     st.subheader("💰 持股追蹤")
 
@@ -1671,21 +1757,6 @@ with tab_institution:
     </div>
     """, unsafe_allow_html=True)
 
-
-
-with tab_news:
-    st.subheader("📰 新聞中心")
-    news_data = {
-        "台積電":["AI需求持續成長，先進製程維持高檔","外資持續關注ADR走勢","CoWoS產能擴充進度受市場關注"],
-        "鴻海":["AI伺服器出貨動能持續","電動車布局進展受關注","法人追蹤第二季展望"],
-        "廣達":["AI伺服器接單強勁","雲端客戶資本支出增加","外資維持正向看法"],
-        "大成鋼":["鋼鋁價格變化影響獲利","美國基建需求持續追蹤","法人觀察庫存變化"],
-        "中鋼":["盤價政策受市場關注","中國鋼市需求觀察","鋼鐵景氣循環追蹤"]
-    }
-    for stock, items in news_data.items():
-        st.markdown(f"### {stock}")
-        for item in items:
-            st.write(f"• {item}")
 
 with tab_ai:
     st.subheader("🤖 AI診斷中心")
@@ -1927,4 +1998,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 9.2a Smart Edition')
+st.caption('Version 9.1 Professional')
