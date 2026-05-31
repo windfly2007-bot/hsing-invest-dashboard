@@ -836,7 +836,7 @@ st.divider()
 st.subheader("📊 單檔股票分析")
 
 selected_stock = st.sidebar.selectbox("選擇股票", list(stock_list.keys()))
-period = st.sidebar.selectbox("期間", ["3mo", "6mo", "1y", "2y"], index=2)
+period = st.sidebar.selectbox("期間", ["1mo", "2mo", "3mo", "6mo", "1y", "2y"], index=4)
 
 df = get_data(stock_list[selected_stock], period)
 
