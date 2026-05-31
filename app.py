@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V5.1", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V6.0", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -693,7 +693,18 @@ def allocation_suggestion(cash, ai_score, steel_score):
 # 主畫面
 # =====================================================
 
-st.title("📈 Hsing 投資儀表板 V5.1")
+st.title("🚀 Hsing 投資儀表板 V6.0")
+
+st.info("""
+V6.0 新增功能：
+✅ 外資/投信連買天數
+✅ ADR隔日提示
+✅ 加碼紅綠燈
+✅ 長線評分
+✅ AI/鋼鐵市場溫度
+✅ 個人化資金配置建議
+""")
+
 
 saved_portfolio = load_portfolio()
 
