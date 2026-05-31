@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V9.0 Fix Professional Edition Fix", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V9.2 Smart Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1590,20 +1590,18 @@ if not perf_df.empty:
 # 分頁細節
 # =====================================================
 
-tab_overview, tab_chart, tab_institution, tab_ai, tab_portfolio = st.tabs([
+tab_overview, tab_chart, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
     "📊 投資總覽",
     "📈 K線中心",
     "🏦 法人中心",
+    "📰 新聞中心",
     "🤖 AI診斷中心",
     "💰 持股中心",
 ])
 
 with tab_overview:
     st.subheader("📊 投資總覽 / 今日預警")
-    st.info(line_msg)
     st.dataframe(alert_df, use_container_width=True, hide_index=True)
-
-    st.caption("LINE Notify 已於 2025/03/31 結束服務；本版使用 LINE Messaging API。未設定 Token 時，只會在儀表板顯示預警，不會推播。")
 
     col_send, col_auto = st.columns([1, 2])
     with col_send:
@@ -1757,6 +1755,13 @@ with tab_institution:
     </div>
     """, unsafe_allow_html=True)
 
+
+with tab_news:
+    st.subheader("📰 新聞中心")
+    st.info("V9.2 Smart Edition 新聞中心（可後續串接 RSS / Yahoo Finance 新聞）")
+    for s in ["台積電","鴻海","廣達","大成鋼","中鋼"]:
+        st.markdown(f"### {s}")
+        st.write("• 最新新聞功能預留")
 
 with tab_ai:
     st.subheader("🤖 AI診斷中心")
