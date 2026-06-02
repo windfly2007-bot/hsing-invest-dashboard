@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.4a Price Sync Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.5 Unified Price Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -149,23 +149,92 @@ hr {
 """, unsafe_allow_html=True)
 
 
-@st.cache_data(ttl=60)
-def get_data(ticker, period="1y"):
-    try:
-        df = yf.Ticker(ticker).history(period=period)
-        return df.dropna()
-    except Exception:
-        return pd.DataFrame()
 
+def ticker_to_twse_id(ticker):
+    if isinstance(ticker, str) and ticker.endswith(".TW"):
+        return ticker.replace(".TW", "")
+    return None
+
+
+@st.cache_data(ttl=60)
+def get_twse_realtime_price(stock_id):
+    """TWSE MIS 即時/最近成交價。失敗時回傳 None。"""
+    try:
+        url = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
+        params = {
+            "ex_ch": f"tse_{stock_id}.tw",
+            "json": "1",
+            "delay": "0",
+            "_": int(datetime.now().timestamp() * 1000),
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://mis.twse.com.tw/stock/index.jsp",
+        }
+        r = requests.get(url, params=params, headers=headers, timeout=8)
+        data = r.json()
+        arr = data.get("msgArray", [])
+        if arr:
+            item = arr[0]
+            for key in ["z", "pz", "a", "b", "o", "y"]:
+                value = item.get(key, "")
+                if isinstance(value, str):
+                    value = value.split("_")[0]
+                try:
+                    price = float(value)
+                    if price > 0:
+                        return price
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return None
+
+
+@st.cache_data(ttl=300)
+def get_twse_latest_daily_close(stock_id):
+    """TWSE 月成交資訊最後一筆收盤價，比 Yahoo 台股日線更穩。"""
+    try:
+        today = datetime.today()
+        url = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
+        params = {
+            "date": today.strftime("%Y%m01"),
+            "stockNo": stock_id,
+            "response": "json",
+        }
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        data = r.json()
+
+        rows = data.get("data", [])
+        if rows:
+            last = rows[-1]
+            close_text = str(last[6]).replace(",", "")
+            price = float(close_text)
+            if price > 0:
+                return price
+    except Exception:
+        pass
+    return None
 
 
 @st.cache_data(ttl=60)
 def get_current_price(ticker):
-    """優先抓取較新的現價/最後成交價，避免劇本頁使用到舊的 1y Close。"""
+    """統一價格來源：TWSE即時 → TWSE日收盤 → Yahoo fast_info → Yahoo 1m → Yahoo 5d。"""
+    stock_id = ticker_to_twse_id(ticker)
+
+    if stock_id:
+        price = get_twse_realtime_price(stock_id)
+        if price is not None and price > 0:
+            return float(price)
+
+        price = get_twse_latest_daily_close(stock_id)
+        if price is not None and price > 0:
+            return float(price)
+
     try:
         t = yf.Ticker(ticker)
 
-        # fast_info 有時可拿到比較新的 last_price
         try:
             fast = t.fast_info
             last_price = fast.get("last_price", None) if hasattr(fast, "get") else getattr(fast, "last_price", None)
@@ -174,7 +243,6 @@ def get_current_price(ticker):
         except Exception:
             pass
 
-        # 台股盤中/盤後用 1d/1m 試抓
         try:
             df_live = t.history(period="1d", interval="1m")
             if not df_live.empty:
@@ -182,7 +250,6 @@ def get_current_price(ticker):
         except Exception:
             pass
 
-        # fallback：5d 日線最後一筆
         df = t.history(period="5d")
         if not df.empty:
             return float(df["Close"].dropna().iloc[-1])
@@ -193,11 +260,32 @@ def get_current_price(ticker):
     return None
 
 
+@st.cache_data(ttl=60)
+def get_data(ticker, period="1y"):
+    """K線資料。最後一筆 Close 會同步統一價格，避免不同頁面價格不一致。"""
+    try:
+        df = yf.Ticker(ticker).history(period=period).dropna()
+        if df.empty:
+            return df
+
+        latest_price = get_current_price(ticker)
+        if latest_price is not None and latest_price > 0:
+            last_idx = df.index[-1]
+            df.loc[last_idx, "Close"] = float(latest_price)
+            if "High" in df.columns:
+                df.loc[last_idx, "High"] = max(float(df.loc[last_idx, "High"]), float(latest_price))
+            if "Low" in df.columns:
+                df.loc[last_idx, "Low"] = min(float(df.loc[last_idx, "Low"]), float(latest_price))
+        return df.dropna()
+    except Exception:
+        return pd.DataFrame()
+
+
 def get_display_price(ticker, df=None):
-    """統一顯示用價格：先即時/最後成交，失敗才用傳入df最後收盤。"""
+    """統一顯示用價格。所有頁面請優先使用此函式。"""
     live_price = get_current_price(ticker)
     if live_price is not None and live_price > 0:
-        return live_price
+        return float(live_price)
 
     if df is not None and not df.empty:
         return float(df.iloc[-1]["Close"])
@@ -208,6 +296,10 @@ def get_display_price(ticker, df=None):
 
     return 0.0
 
+
+def data_update_status():
+    now_text = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+    return f"資料更新時間：{now_text}｜價格來源優先順序：TWSE即時 → TWSE收盤 → Yahoo Finance"
 
 
 def create_default_csv():
@@ -742,7 +834,7 @@ def generate_alerts(ai_score, steel_score, chip_score_map):
         if df.empty or len(df) < 120:
             continue
 
-        current = df.iloc[-1]["Close"]
+        current = float(get_display_price(ticker, df))
         ma20 = df["Close"].rolling(20).mean().iloc[-1]
         rule = long_term_rules[stock_name]
         distance, risk_level = risk_distance_from_ma(df)
@@ -948,7 +1040,7 @@ def stock_diagnosis(stock_name, ticker, ai_score, steel_score, chip_score_map):
     if df.empty or len(df) < 120:
         return None
 
-    current = float(df.iloc[-1]["Close"])
+    current = float(get_display_price(ticker, df))
     health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
     distance, risk_text = risk_distance_from_ma(df)
     progress, buy_text = buy_point_progress(stock_name, current)
@@ -1062,7 +1154,7 @@ def portfolio_performance_rows(portfolio, fee_discount):
         if df.empty or len(df) < 2:
             continue
 
-        current = float(df.iloc[-1]["Close"])
+        current = float(get_display_price(ticker, df))
         buy_amount, sell_amount, net_profit, net_profit_pct = calc_net_profit(
             info["shares"], info["cost"], current, fee_discount
         )
@@ -1095,7 +1187,7 @@ def cost_warning_rows(portfolio):
         if df.empty:
             continue
 
-        current = float(df.iloc[-1]["Close"])
+        current = float(get_display_price(ticker, df))
         cost = float(info["cost"])
         gap_pct = (current - cost) / cost * 100 if cost else 0
 
@@ -1125,7 +1217,7 @@ def v64_dashboard_rows(portfolio, cash_input):
         if df.empty:
             continue
 
-        current = float(df.iloc[-1]["Close"])
+        current = float(get_display_price(ticker, df))
         tech_signal, tech_score = technical_signal(stock_name, ticker)
         add_shares, add_amount = estimate_add_shares(stock_name, cash_input)
         div_yield = dividend_yield_estimate(stock_name, current)
@@ -1239,7 +1331,7 @@ def allocation_radar_rows(portfolio):
         if df.empty:
             continue
 
-        current = float(df.iloc[-1]["Close"])
+        current = float(get_display_price(ticker, df))
         value = current * info["shares"]
         value_map[stock_name] = value
         total_value += value
@@ -1304,7 +1396,7 @@ def portfolio_risk_dashboard(portfolio):
         if df.empty:
             continue
 
-        current = float(df.iloc[-1]["Close"])
+        current = float(get_display_price(ticker, df))
         value = current * int(info["shares"])
         group = long_term_rules.get(stock_name, {}).get("type", "OTHER")
 
@@ -1608,7 +1700,7 @@ def watchlist_today(portfolio, ai_score, steel_score, chip_score_map):
         if df.empty or len(df) < 120:
             continue
 
-        current = float(df.iloc[-1]["Close"])
+        current = float(get_display_price(ticker, df))
         health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
         _, risk_text = risk_distance_from_ma(df)
         progress, buy_text = buy_point_progress(stock_name, current)
@@ -1733,7 +1825,7 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
         if df.empty or len(df) < 120:
             continue
 
-        current = float(df.iloc[-1]["Close"])
+        current = float(get_display_price(ticker, df))
         rule = long_term_rules[stock_name]
         health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
         distance, risk_text = risk_distance_from_ma(df)
@@ -1969,6 +2061,12 @@ def tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map):
 
 st.title("📈 Hsing 投資儀表板")
 
+st.caption(data_update_status())
+if st.button("🔄 強制更新價格資料"):
+    st.cache_data.clear()
+    st.rerun()
+
+
 if st.button("🔄 強制更新價格資料"):
     st.cache_data.clear()
     st.rerun()
@@ -2025,7 +2123,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.4a Price Sync Edition
+# 分頁細節：V10.5 Unified Price Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2135,6 +2233,7 @@ with tab_scenario:
 
 
 with tab_portfolio:
+    st.caption(data_update_status())
     st.subheader("💰 持股追蹤")
 
     portfolio_rows = []
@@ -2147,7 +2246,7 @@ with tab_portfolio:
         if df_p.empty or len(df_p) < 2:
             continue
 
-        current = float(df_p.iloc[-1]["Close"])
+        current = float(get_display_price(stock_list[stock_name], df_p))
         buy_amount, sell_amount, net_profit, net_profit_pct = calc_net_profit(
             info["shares"], info["cost"], current, fee_discount
         )
@@ -2500,7 +2599,7 @@ with tab_ai:
 
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V10.4a Price Sync Edition")
+    st.subheader("📈 個股K線分析 V10.5 Unified Price Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -2665,4 +2764,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 10.4a Price Sync Edition')
+st.caption('Version 10.5 Unified Price Edition')
