@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V9.4a Decision Summary Fix", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.0 Decision Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1238,6 +1238,121 @@ def asset_allocation_summary(portfolio):
 
 
 
+
+def portfolio_risk_dashboard(portfolio):
+    """依持股市值計算 AI / 鋼鐵族群集中度。"""
+    rows = []
+    total_value = 0
+    group_value = {"AI": 0, "STEEL": 0}
+
+    for stock_name, info in portfolio.items():
+        if stock_name not in stock_list:
+            continue
+        df = get_data(stock_list[stock_name], "5d")
+        if df.empty:
+            continue
+
+        current = float(df.iloc[-1]["Close"])
+        value = current * int(info["shares"])
+        group = long_term_rules.get(stock_name, {}).get("type", "OTHER")
+
+        total_value += value
+        if group in group_value:
+            group_value[group] += value
+
+        rows.append({
+            "股票": stock_name,
+            "族群": "AI / 半導體" if group == "AI" else "鋼鐵 / 原物料",
+            "市值": round(value),
+            "占比": 0,
+        })
+
+    if total_value > 0:
+        for row in rows:
+            row["占比"] = round(row["市值"] / total_value * 100, 1)
+
+    ai_pct = group_value["AI"] / total_value * 100 if total_value else 0
+    steel_pct = group_value["STEEL"] / total_value * 100 if total_value else 0
+
+    if ai_pct >= 80:
+        risk = "🟠 AI族群集中偏高"
+        note = "AI持股占比偏高，若AI股短線過熱，建議保留現金或用鋼鐵股分散。"
+    elif steel_pct >= 45:
+        risk = "🟠 鋼鐵族群偏高"
+        note = "鋼鐵持股占比偏高，景氣循環波動較大，建議避免一次加碼太多。"
+    else:
+        risk = "🟢 配置尚可"
+        note = "目前族群配置尚可，後續以加碼區與法人共振做分批操作。"
+
+    return pd.DataFrame(rows), round(ai_pct, 1), round(steel_pct, 1), risk, note
+
+
+def v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_score_map):
+    """產生 V10 買賣計畫中心表格。"""
+    rows = []
+
+    for stock_name, ticker in stock_list.items():
+        df = get_data(ticker, "1y")
+        if df.empty or len(df) < 20:
+            continue
+
+        current = float(df.iloc[-1]["Close"])
+        plan = smart_trade_plan(stock_name, current, portfolio)
+        health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+        signal, reason = operation_signal(
+            stock_name,
+            current,
+            health,
+            chip_score_map.get(stock_name, 0),
+            risk_distance_from_ma(df)[1],
+        )
+
+        rule = long_term_rules.get(stock_name, {})
+        add_price = float(rule.get("add", current))
+        reduce_price = float(rule.get("reduce", current))
+
+        dist_add = (current - add_price) / add_price * 100 if add_price else 0
+        dist_reduce = (reduce_price - current) / current * 100 if current else 0
+
+        rows.append({
+            "股票": stock_name,
+            "現價": round(current, 2),
+            "AI燈號": signal,
+            "加碼區": plan["加碼區"],
+            "距加碼": f"{dist_add:+.1f}%",
+            "建議加碼": plan["建議股數"] if "加碼" in plan["建議股數"] else "暫不加碼",
+            "減碼區": plan["減碼區"],
+            "距減碼": f"{dist_reduce:+.1f}%",
+            "建議減碼": plan["建議股數"] if "減碼" in plan["建議股數"] else "暫不減碼",
+            "位置狀態": plan["位置狀態"],
+            "理由": reason,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def news_ai_brief(hot_rows):
+    """把新聞情緒簡化成投資解讀。"""
+    if not hot_rows:
+        return "目前新聞資料不足，先以技術面與法人籌碼為主。"
+
+    positive = sum(1 for x in hot_rows if "利多" in str(x.get("情緒", "")))
+    negative = sum(1 for x in hot_rows if "利空" in str(x.get("情緒", "")))
+    neutral = len(hot_rows) - positive - negative
+
+    if positive > negative:
+        tone = "🟢 新聞偏正面"
+        action = "可搭配法人與K線續抱觀察，但若已進入減碼區仍不追高。"
+    elif negative > positive:
+        tone = "🔴 新聞偏負面"
+        action = "短線先保守，避免追價，等待支撐區與法人止賣。"
+    else:
+        tone = "🟡 新聞中性"
+        action = "目前新聞沒有明顯方向，仍以加碼區 / 減碼區與法人共振判斷。"
+
+    return f"{tone}｜利多 {positive} 則、利空 {negative} 則、中性 {neutral} 則。{action}"
+
+
 def smart_trade_plan(stock_name, current_price, portfolio=None):
     """回傳 AI 加碼區、減碼區與建議股數。"""
     if stock_name not in long_term_rules or current_price <= 0:
@@ -1659,7 +1774,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V9.4a Decision Summary Fix
+# 分頁細節：V10.0 Decision Edition
 # =====================================================
 
 tab_overview, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -1696,6 +1811,21 @@ with tab_overview:
         # 首頁只保留操作決策，買點/健康度/觀察重點留到 AI診斷中心與持股中心
         keep_cols = [c for c in ["股票", "現價", "操作燈號", "加碼區", "減碼區", "位置狀態", "建議股數", "主要理由"] if c in summary_df.columns]
         st.dataframe(summary_df[keep_cols], use_container_width=True, hide_index=True)
+
+    st.subheader("🎯 V10 今日買賣計畫")
+    trade_plan_df = v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_score_map)
+    if not trade_plan_df.empty:
+        compact_cols = [c for c in ["股票", "現價", "AI燈號", "加碼區", "建議加碼", "減碼區", "建議減碼", "位置狀態"] if c in trade_plan_df.columns]
+        st.dataframe(trade_plan_df[compact_cols], use_container_width=True, hide_index=True)
+
+    st.subheader("🧭 投資組合風險")
+    risk_df, ai_pct, steel_pct, risk_label, risk_note = portfolio_risk_dashboard(portfolio)
+    r1, r2, r3 = st.columns(3)
+    r1.metric("AI族群占比", f"{ai_pct:.1f}%")
+    r2.metric("鋼鐵族群占比", f"{steel_pct:.1f}%")
+    r3.metric("配置風險", risk_label)
+    st.info(risk_note)
+
 
     st.caption("持股明細請到「💰 持股中心」；健康度、買點與診斷細節請到「🧠 AI診斷中心」。")
 
@@ -1760,6 +1890,21 @@ with tab_portfolio:
     if not div_df.empty:
         st.dataframe(div_df, use_container_width=True, hide_index=True)
         st.metric("預估全年股息收入", f"{total_div:,.0f} 元")
+
+    st.subheader("🎯 AI買賣計畫中心")
+    trade_plan_df = v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_score_map)
+    if not trade_plan_df.empty:
+        st.dataframe(trade_plan_df, use_container_width=True, hide_index=True)
+
+    st.subheader("🧭 投資組合風險儀表板")
+    risk_df, ai_pct, steel_pct, risk_label, risk_note = portfolio_risk_dashboard(portfolio)
+    rc1, rc2, rc3 = st.columns(3)
+    rc1.metric("AI族群占比", f"{ai_pct:.1f}%")
+    rc2.metric("鋼鐵族群占比", f"{steel_pct:.1f}%")
+    rc3.metric("集中風險", risk_label)
+    if not risk_df.empty:
+        st.dataframe(risk_df, use_container_width=True, hide_index=True)
+    st.info(risk_note)
 
     st.subheader("💵 新資金配置建議")
     allocation_df = allocation_suggestion(cash_input, ai_score, steel_score)
@@ -1894,6 +2039,9 @@ with tab_news:
 
     st.subheader("🔥 今日熱門新聞")
     if hot_rows:
+        st.subheader("🤖 新聞AI解讀")
+        st.info(news_ai_brief(hot_rows))
+
         hot_df = pd.DataFrame(hot_rows[:8])
         st.dataframe(
             hot_df[["情緒", "標題", "來源"]],
@@ -2201,4 +2349,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 9.4a Decision Summary Fix')
+st.caption('Version 10.0 Decision Edition')
