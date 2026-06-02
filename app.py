@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.5a Duplicate Button Fix Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.5b Price Function Fix Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1154,7 +1154,7 @@ def portfolio_performance_rows(portfolio, fee_discount):
         if df.empty or len(df) < 2:
             continue
 
-        current = float(get_display_price(ticker, df))
+        current = float(get_display_price(stock_list[stock_name], df))
         buy_amount, sell_amount, net_profit, net_profit_pct = calc_net_profit(
             info["shares"], info["cost"], current, fee_discount
         )
@@ -1187,7 +1187,7 @@ def cost_warning_rows(portfolio):
         if df.empty:
             continue
 
-        current = float(get_display_price(ticker, df))
+        current = float(get_display_price(stock_list[stock_name], df))
         cost = float(info["cost"])
         gap_pct = (current - cost) / cost * 100 if cost else 0
 
@@ -1217,7 +1217,7 @@ def v64_dashboard_rows(portfolio, cash_input):
         if df.empty:
             continue
 
-        current = float(get_display_price(ticker, df))
+        current = float(get_display_price(stock_list[stock_name], df))
         tech_signal, tech_score = technical_signal(stock_name, ticker)
         add_shares, add_amount = estimate_add_shares(stock_name, cash_input)
         div_yield = dividend_yield_estimate(stock_name, current)
@@ -1331,7 +1331,7 @@ def allocation_radar_rows(portfolio):
         if df.empty:
             continue
 
-        current = float(get_display_price(ticker, df))
+        current = float(get_display_price(stock_list[stock_name], df))
         value = current * info["shares"]
         value_map[stock_name] = value
         total_value += value
@@ -1396,7 +1396,7 @@ def portfolio_risk_dashboard(portfolio):
         if df.empty:
             continue
 
-        current = float(get_display_price(ticker, df))
+        current = float(get_display_price(stock_list[stock_name], df))
         value = current * int(info["shares"])
         group = long_term_rules.get(stock_name, {}).get("type", "OTHER")
 
@@ -2067,10 +2067,6 @@ if st.button("🔄 強制更新價格資料", key="refresh_price_button_1"):
     st.rerun()
 
 
-if st.button("🔄 強制更新價格資料", key="refresh_price_button_2"):
-    st.cache_data.clear()
-    st.rerun()
-
 
 
 saved_portfolio = load_portfolio()
@@ -2123,7 +2119,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.5a Duplicate Button Fix Edition
+# 分頁細節：V10.5b Price Function Fix Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2599,7 +2595,7 @@ with tab_ai:
 
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V10.5a Duplicate Button Fix Edition")
+    st.subheader("📈 個股K線分析 V10.5b Price Function Fix Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -2764,4 +2760,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 10.5a Duplicate Button Fix Edition')
+st.caption('Version 10.5b Price Function Fix Edition')
