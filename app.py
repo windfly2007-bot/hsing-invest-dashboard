@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.5 Unified Price Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.5a Duplicate Button Fix Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -2062,12 +2062,12 @@ def tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map):
 st.title("📈 Hsing 投資儀表板")
 
 st.caption(data_update_status())
-if st.button("🔄 強制更新價格資料"):
+if st.button("🔄 強制更新價格資料", key="refresh_price_button_1"):
     st.cache_data.clear()
     st.rerun()
 
 
-if st.button("🔄 強制更新價格資料"):
+if st.button("🔄 強制更新價格資料", key="refresh_price_button_2"):
     st.cache_data.clear()
     st.rerun()
 
@@ -2123,7 +2123,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.5 Unified Price Edition
+# 分頁細節：V10.5a Duplicate Button Fix Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2599,7 +2599,7 @@ with tab_ai:
 
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V10.5 Unified Price Edition")
+    st.subheader("📈 個股K線分析 V10.5a Duplicate Button Fix Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -2764,4 +2764,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 10.5 Unified Price Edition')
+st.caption('Version 10.5a Duplicate Button Fix Edition')
