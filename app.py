@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V9.2b Smart Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V9.3 Layout Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1590,12 +1590,14 @@ if not perf_df.empty:
 # 分頁細節
 # =====================================================
 
-tab_overview, tab_chart, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
+tab_overview, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
     "📊 投資總覽",
     "📈 K線中心",
+    "🤖 AI / 半導體市場",
+    "🏗️ 鋼鐵 / 原物料",
     "🏦 法人中心",
     "📰 新聞中心",
-    "🤖 AI診斷中心",
+    "🧠 AI診斷中心",
     "💰 持股中心",
 ])
 
@@ -1686,23 +1688,51 @@ with tab_portfolio:
     allocation_df = allocation_suggestion(cash_input, ai_score, steel_score)
     st.dataframe(allocation_df, use_container_width=True, hide_index=True)
 
-with tab_institution:
+with tab_ai_market:
     st.subheader("🤖 AI / 半導體市場")
     cols = st.columns(len(ai_market_list))
     for i, (name, ticker) in enumerate(ai_market_list.items()):
         latest, pct = get_latest_pct(ticker)
         cols[i].markdown(market_card(name, "N/A" if latest is None else f"{latest:.2f}", pct), unsafe_allow_html=True)
+
     st.metric("AI市場溫度", f"{ai_score} 分")
     st.info(ai_temperature_comment(ai_score))
 
+    leader_score, leader_msg = leader_index_score()
+    st.metric("AI領先指數", f"{leader_score} 分")
+    st.info(leader_msg)
+
+    st.subheader("🌙 台積電 ADR / 美股隔日提示")
+    adr_info = adr_prediction_text()
+    st.markdown(f"""
+    <div class="alert-card">
+    <b>{adr_info['判斷']}</b><br>
+    依據：{adr_info['依據']}<br>
+    建議：{adr_info['建議']}
+    </div>
+    """, unsafe_allow_html=True)
+
+
+with tab_steel:
     st.subheader("🏗️ 鋼鐵 / 原物料")
     cols = st.columns(len(commodity_list))
     for i, (name, ticker) in enumerate(commodity_list.items()):
         latest, pct = get_latest_pct(ticker)
         cols[i].markdown(market_card(name, "N/A" if latest is None else f"{latest:.2f}", pct), unsafe_allow_html=True)
+
     st.metric("鋼鐵市場溫度", f"{steel_score} 分")
     st.info(steel_temperature_comment(steel_score))
 
+    steel_leader_score, steel_leader_msg = steel_leader_index_score()
+    st.metric("鋼鐵領先指數", f"{steel_leader_score} 分")
+    st.info(steel_leader_msg)
+
+    steel_score_now, steel_light = steel_stock_score()
+    st.subheader("🏭 鋼鐵景氣燈號")
+    st.metric("鋼鐵景氣分數", f"{steel_score_now} 分", steel_light)
+
+
+with tab_institution:
     st.subheader("🏦 法人籌碼 5日 / 20日")
     chip_df = pd.DataFrame(chip_rows)
     st.dataframe(chip_df, use_container_width=True, hide_index=True)
@@ -1737,16 +1767,6 @@ with tab_institution:
     st.subheader("🏆 法人強度排行榜")
     rank_df = institutional_strength_rank()
     st.dataframe(rank_df, use_container_width=True, hide_index=True)
-
-    st.subheader("🌙 台積電 ADR / 美股隔日提示")
-    adr_info = adr_prediction_text()
-    st.markdown(f"""
-    <div class="alert-card">
-    <b>{adr_info['判斷']}</b><br>
-    依據：{adr_info['依據']}<br>
-    建議：{adr_info['建議']}
-    </div>
-    """, unsafe_allow_html=True)
 
 
 with tab_news:
@@ -2045,4 +2065,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 9.2b Smart Edition')
+st.caption('Version 9.3 Layout Edition')
