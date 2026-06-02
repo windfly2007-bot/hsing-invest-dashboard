@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V9.4 Trade Plan Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V9.4a Decision Summary Fix", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1659,7 +1659,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V9.4 Trade Plan Edition
+# 分頁細節：V9.4a Decision Summary Fix
 # =====================================================
 
 tab_overview, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -1966,12 +1966,71 @@ with tab_ai:
     if not diagnosis_df.empty:
         st.dataframe(diagnosis_df, use_container_width=True, hide_index=True)
 
-        best = diagnosis_df.sort_values("總分", ascending=False).iloc[0]
-        weak = diagnosis_df.sort_values("總分", ascending=True).iloc[0]
+        # V9.4a：AI診斷結論改為決策型，不再單純用總分第一名當「今日較強」
+        df_decision = diagnosis_df.copy()
+
+        def resonance_rank(text):
+            if "法人共振" in str(text):
+                return 2
+            if "單一法人轉強" in str(text):
+                return 1
+            return 0
+
+        def signal_rank(text):
+            text = str(text)
+            if "加碼" in text:
+                return 3
+            if "續抱" in text:
+                return 2
+            if "觀察" in text:
+                return 1
+            return 0
+
+        df_decision["法人分數"] = df_decision["法人共振"].apply(resonance_rank)
+        df_decision["燈號分數"] = df_decision["AI燈號"].apply(signal_rank)
+
+        # 今日最值得關注：總分高、法人轉強、但不是減碼/停買
+        focus_df = df_decision[~df_decision["AI燈號"].astype(str).str.contains("減碼|停買|保守", na=False)].copy()
+        if focus_df.empty:
+            focus_df = df_decision.copy()
+
+        focus = focus_df.sort_values(
+            ["總分", "法人分數", "燈號分數"],
+            ascending=[False, False, False]
+        ).iloc[0]
+
+        # 最接近減碼：AI燈號已經出現減碼/停買
+        reduce_df = df_decision[df_decision["AI燈號"].astype(str).str.contains("減碼|停買", na=False)]
+        reduce_item = reduce_df.sort_values(["總分"], ascending=False).iloc[0] if not reduce_df.empty else None
+
+        # 最穩健：續抱且總分高，不含減碼/停買
+        stable_df = df_decision[
+            df_decision["AI燈號"].astype(str).str.contains("續抱", na=False)
+            & ~df_decision["AI燈號"].astype(str).str.contains("減碼|停買", na=False)
+        ]
+        stable = stable_df.sort_values(["總分", "法人分數"], ascending=[False, False]).iloc[0] if not stable_df.empty else focus
+
+        weak = df_decision.sort_values("總分", ascending=True).iloc[0]
 
         c1, c2 = st.columns(2)
-        c1.success(f"🥇 今日較強：{best['股票']}｜{best['總分']}分｜{best['AI燈號']}")
-        c2.warning(f"⚠️ 需觀察：{weak['股票']}｜{weak['總分']}分｜{weak['AI燈號']}")
+        c1.success(
+            f"🎯 今日最值得關注：{focus['股票']}｜{focus['總分']}分｜{focus['AI燈號']}｜{focus['法人共振']}"
+        )
+        c2.warning(
+            f"⚠️ 最需觀察：{weak['股票']}｜{weak['總分']}分｜{weak['AI燈號']}"
+        )
+
+        c3, c4 = st.columns(2)
+        if reduce_item is not None:
+            c3.info(
+                f"🟠 最接近減碼：{reduce_item['股票']}｜{reduce_item['總分']}分｜{reduce_item['AI燈號']}"
+            )
+        else:
+            c3.info("🟠 最接近減碼：目前沒有明顯減碼訊號")
+
+        c4.success(
+            f"🏆 最穩健續抱：{stable['股票']}｜{stable['總分']}分｜{stable['AI燈號']}"
+        )
     else:
         st.info("目前資料不足，無法產生AI診斷。")
 
@@ -2142,4 +2201,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 9.4 Trade Plan Edition')
+st.caption('Version 9.4a Decision Summary Fix')
