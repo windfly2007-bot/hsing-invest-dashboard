@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.2a Decision Cards Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.3 Long-Term Investor Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1289,7 +1289,7 @@ def portfolio_risk_dashboard(portfolio):
 
 
 def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
-    """V10.2a 首頁決策卡：最強、最需注意、最佳加碼、禁止加碼。"""
+    """V10.3 首頁決策卡：第一梯隊、最需注意、最佳加碼、禁止加碼。"""
     rows = []
 
     for stock_name, ticker in stock_list.items():
@@ -1338,28 +1338,28 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
     if df.empty:
         return {}
 
-    # 最強個股：總分最高，若同分取法人/資料順序
-    strongest = df.sort_values(["AI總分"], ascending=False).iloc[0]
+    top_score = int(df["AI總分"].max())
+    top_group = df[df["AI總分"] >= top_score - 2].sort_values(["AI總分"], ascending=False)
+    top_group_names = "、".join(top_group["股票"].tolist())
 
-    # 最需注意：優先抓接近/進入減碼區，其次抓高分但距減碼最近
     caution_df = df[df["動作"].astype(str).str.contains("減碼", na=False)]
     if caution_df.empty:
         caution = df.sort_values(["距減碼%"], ascending=True).iloc[0]
     else:
         caution = caution_df.sort_values(["距減碼%"], ascending=True).iloc[0]
 
-    # 最佳加碼機會：分數 >=50 且最接近加碼價；若沒有就顯示目前沒有
     add_df = df[df["AI總分"] >= 50].copy()
     add_df = add_df[add_df["距加碼%"] <= 5]
     best_add = add_df.sort_values(["距加碼%", "AI總分"], ascending=[True, False]).iloc[0] if not add_df.empty else None
 
-    # 禁止加碼：分數最低且低於50
     forbidden_df = df[df["AI總分"] < 50]
     forbidden = forbidden_df.sort_values(["AI總分"], ascending=True).iloc[0] if not forbidden_df.empty else None
 
     return {
         "df": df,
-        "strongest": strongest,
+        "top_score": top_score,
+        "top_group_names": top_group_names,
+        "top_group": top_group,
         "caution": caution,
         "best_add": best_add,
         "forbidden": forbidden,
@@ -1871,7 +1871,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.2a Decision Cards Edition
+# 分頁細節：V10.3 Long-Term Investor Edition
 # =====================================================
 
 tab_overview, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -1898,23 +1898,24 @@ with tab_overview:
 
     decision = v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map)
     if decision:
-        strongest = decision["strongest"]
+        top_group_names = decision["top_group_names"]
+        top_score = decision["top_score"]
         caution = decision["caution"]
         best_add = decision["best_add"]
         forbidden = decision["forbidden"]
 
         st.subheader("🎯 今日決策卡")
         d1, d2, d3, d4 = st.columns(4)
-        d1.success(f"🏆 最強個股\\n\\n{strongest['股票']}｜{strongest['AI總分']}分")
-        d2.warning(f"⚠️ 最需注意\\n\\n{caution['股票']}｜距減碼 {caution['距減碼%']}%")
+        d1.success(f"🏆 第一梯隊：{top_group_names}｜{top_score}分")
+        d2.warning(f"⚠️ 最需注意：{caution['股票']}｜距減碼 {caution['距減碼%']}%")
         if best_add is not None:
-            d3.success(f"🟢 最佳加碼\\n\\n{best_add['股票']}｜距加碼 {best_add['距加碼%']}%")
+            d3.success(f"🟢 最佳加碼：{best_add['股票']}｜加碼價 {best_add['加碼價']}｜距加碼 {best_add['距加碼%']}%")
         else:
-            d3.info("🟢 最佳加碼\\n\\n目前沒有")
+            d3.info("🟢 最佳加碼：目前沒有")
         if forbidden is not None:
-            d4.error(f"🔴 禁止加碼\\n\\n{forbidden['股票']}｜{forbidden['AI總分']}分")
+            d4.error(f"🔴 禁止加碼：{forbidden['股票']}｜{forbidden['AI總分']}分")
         else:
-            d4.success("🔴 禁止加碼\\n\\n目前沒有")
+            d4.success("🔴 禁止加碼：目前沒有")
 
 
     st.subheader("🚨 今日重要預警")
@@ -2281,14 +2282,15 @@ with tab_ai:
         decision = v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map)
 
         if decision:
-            strongest = decision["strongest"]
+            top_group_names = decision["top_group_names"]
+            top_score = decision["top_score"]
             caution = decision["caution"]
             best_add = decision["best_add"]
             forbidden = decision["forbidden"]
 
             c1, c2 = st.columns(2)
             c1.success(
-                f"🏆 最強個股：{strongest['股票']}｜{strongest['AI總分']}分｜{strongest['動作']}"
+                f"🏆 第一梯隊：{top_group_names}｜{top_score}分"
             )
             c2.warning(
                 f"⚠️ 最需注意：{caution['股票']}｜現價 {caution['現價']}｜距減碼 {caution['距減碼%']}%｜{caution['動作']}"
@@ -2478,4 +2480,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 10.2a Decision Cards Edition')
+st.caption('Version 10.3 Long-Term Investor Edition')
