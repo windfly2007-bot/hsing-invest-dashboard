@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.0 Decision Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.1 Long-Term Investor Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1314,13 +1314,31 @@ def v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_scor
         dist_add = (current - add_price) / add_price * 100 if add_price else 0
         dist_reduce = (reduce_price - current) / current * 100 if current else 0
 
+        
+        if health >= 80:
+            long_term_action = "🟢 積極加碼"
+        elif health >= 65:
+            long_term_action = "🟢 分批加碼"
+        elif health >= 50:
+            long_term_action = "🟡 觀察"
+        elif health >= 40:
+            long_term_action = "🟠 不建議加碼"
+        else:
+            long_term_action = "🔴 禁止加碼"
+
         rows.append({
             "股票": stock_name,
+            "AI總分": health,
+            "長線建議": long_term_action,
             "現價": round(current, 2),
             "AI燈號": signal,
             "加碼區": plan["加碼區"],
             "距加碼": f"{dist_add:+.1f}%",
-            "建議加碼": plan["建議股數"] if "加碼" in plan["建議股數"] else "暫不加碼",
+            "建議加碼": (
+                "🔴 禁止加碼(總分過低)"
+                if health < 50
+                else (plan["建議股數"] if "加碼" in plan["建議股數"] else "暫不加碼")
+            ),
             "減碼區": plan["減碼區"],
             "距減碼": f"{dist_reduce:+.1f}%",
             "建議減碼": plan["建議股數"] if "減碼" in plan["建議股數"] else "暫不減碼",
@@ -1774,7 +1792,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.0 Decision Edition
+# 分頁細節：V10.1 Long-Term Investor Edition
 # =====================================================
 
 tab_overview, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2349,4 +2367,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 10.0 Decision Edition')
+st.caption('Version 10.1 Long-Term Investor Edition')
