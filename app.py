@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.4 Scenario Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.4a Price Sync Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -149,13 +149,65 @@ hr {
 """, unsafe_allow_html=True)
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def get_data(ticker, period="1y"):
     try:
         df = yf.Ticker(ticker).history(period=period)
         return df.dropna()
     except Exception:
         return pd.DataFrame()
+
+
+
+@st.cache_data(ttl=60)
+def get_current_price(ticker):
+    """優先抓取較新的現價/最後成交價，避免劇本頁使用到舊的 1y Close。"""
+    try:
+        t = yf.Ticker(ticker)
+
+        # fast_info 有時可拿到比較新的 last_price
+        try:
+            fast = t.fast_info
+            last_price = fast.get("last_price", None) if hasattr(fast, "get") else getattr(fast, "last_price", None)
+            if last_price is not None and float(last_price) > 0:
+                return float(last_price)
+        except Exception:
+            pass
+
+        # 台股盤中/盤後用 1d/1m 試抓
+        try:
+            df_live = t.history(period="1d", interval="1m")
+            if not df_live.empty:
+                return float(df_live["Close"].dropna().iloc[-1])
+        except Exception:
+            pass
+
+        # fallback：5d 日線最後一筆
+        df = t.history(period="5d")
+        if not df.empty:
+            return float(df["Close"].dropna().iloc[-1])
+
+    except Exception:
+        pass
+
+    return None
+
+
+def get_display_price(ticker, df=None):
+    """統一顯示用價格：先即時/最後成交，失敗才用傳入df最後收盤。"""
+    live_price = get_current_price(ticker)
+    if live_price is not None and live_price > 0:
+        return live_price
+
+    if df is not None and not df.empty:
+        return float(df.iloc[-1]["Close"])
+
+    fallback = get_data(ticker, "5d")
+    if not fallback.empty:
+        return float(fallback.iloc[-1]["Close"])
+
+    return 0.0
+
 
 
 def create_default_csv():
@@ -1297,7 +1349,7 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
         if df.empty or len(df) < 120:
             continue
 
-        current = float(df.iloc[-1]["Close"])
+        current = float(get_display_price(ticker, df))
         health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
         rule = long_term_rules[stock_name]
         add_price = float(rule["add"])
@@ -1375,7 +1427,7 @@ def v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_scor
         if df.empty or len(df) < 20:
             continue
 
-        current = float(df.iloc[-1]["Close"])
+        current = float(get_display_price(ticker, df))
         plan = smart_trade_plan(stock_name, current, portfolio)
         health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
         signal, reason = operation_signal(
@@ -1518,7 +1570,7 @@ def ai_investment_summary(portfolio, ai_score, steel_score, chip_score_map):
         if df.empty or len(df) < 120:
             continue
 
-        current = float(df.iloc[-1]["Close"])
+        current = float(get_display_price(ticker, df))
         health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
         _, risk_text = risk_distance_from_ma(df)
         signal, reason = operation_signal(
@@ -1830,7 +1882,7 @@ def tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map):
         df = calculate_kd(df.copy())
         df = calculate_macd(df.copy())
 
-        current = float(df.iloc[-1]["Close"])
+        current = float(get_display_price(ticker, df))
         prev = float(df.iloc[-2]["Close"])
         day_pct = (current - prev) / prev * 100 if prev else 0
 
@@ -1917,6 +1969,11 @@ def tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map):
 
 st.title("📈 Hsing 投資儀表板")
 
+if st.button("🔄 強制更新價格資料"):
+    st.cache_data.clear()
+    st.rerun()
+
+
 
 saved_portfolio = load_portfolio()
 
@@ -1968,7 +2025,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.4 Scenario Edition
+# 分頁細節：V10.4a Price Sync Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2057,7 +2114,7 @@ with tab_overview:
 
 with tab_scenario:
     st.subheader("🔮 明日持股走勢可能劇本分析")
-    st.caption("依技術面、籌碼面、產業溫度、支撐壓力與加碼/減碼區推估，作為長線投資輔助參考。")
+    st.caption("現價優先抓取最新/最後成交價；依技術面、籌碼面、產業溫度、支撐壓力與加碼/減碼區推估，作為長線投資輔助參考。")
 
     scenario_df = tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map)
 
@@ -2443,7 +2500,7 @@ with tab_ai:
 
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V10.4 Scenario Edition")
+    st.subheader("📈 個股K線分析 V10.4a Price Sync Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -2608,4 +2665,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 10.4 Scenario Edition')
+st.caption('Version 10.4a Price Sync Edition')
