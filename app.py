@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V9.3b Layout Fix", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V9.4 Trade Plan Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1237,6 +1237,67 @@ def asset_allocation_summary(portfolio):
     return summary, note
 
 
+
+def smart_trade_plan(stock_name, current_price, portfolio=None):
+    """回傳 AI 加碼區、減碼區與建議股數。"""
+    if stock_name not in long_term_rules or current_price <= 0:
+        return {"加碼區": "-", "減碼區": "-", "建議股數": "-", "位置狀態": "-"}
+
+    rule = long_term_rules[stock_name]
+    strong_add = float(rule["strong_add"])
+    add_price = float(rule["add"])
+    reduce_price = float(rule["reduce"])
+
+    add_low = min(strong_add, add_price)
+    add_high = max(strong_add, add_price)
+    reduce_low = reduce_price
+    reduce_high = reduce_price * 1.05
+
+    cash_available = float(globals().get("cash_input", 30000))
+    add_budget = cash_available * 0.30
+    strong_add_budget = cash_available * 0.50
+
+    held_shares = 0
+    if portfolio and stock_name in portfolio:
+        held_shares = int(portfolio[stock_name].get("shares", 0))
+
+    if current_price <= add_low:
+        add_shares = int(strong_add_budget // current_price)
+        status = "🟢 強力加碼區"
+        suggested = f"建議加碼 {add_shares} 股"
+    elif current_price <= add_high:
+        add_shares = int(add_budget // current_price)
+        status = "🟢 加碼區"
+        suggested = f"建議加碼 {add_shares} 股"
+    elif current_price <= add_high * 1.03:
+        add_shares = int((add_budget * 0.5) // current_price)
+        status = "🟡 接近加碼區"
+        suggested = f"可觀察加碼 {add_shares} 股"
+    elif current_price >= reduce_high:
+        reduce_shares = max(1, int(held_shares * 0.30)) if held_shares else 0
+        status = "🔴 高於減碼區"
+        suggested = f"建議減碼 {reduce_shares} 股" if reduce_shares else "無持股可減碼"
+    elif current_price >= reduce_low:
+        reduce_shares = max(1, int(held_shares * 0.20)) if held_shares else 0
+        status = "🟠 減碼區"
+        suggested = f"建議減碼 {reduce_shares} 股" if reduce_shares else "無持股可減碼"
+    elif current_price >= reduce_low * 0.97:
+        reduce_shares = max(1, int(held_shares * 0.10)) if held_shares else 0
+        status = "🟠 接近減碼區"
+        suggested = f"可觀察減碼 {reduce_shares} 股" if reduce_shares else "無持股可減碼"
+    else:
+        status = "🔵 續抱區"
+        suggested = "暫不加減碼"
+
+    return {
+        "加碼區": f"{add_low:.2f}~{add_high:.2f}",
+        "減碼區": f"{reduce_low:.2f}~{reduce_high:.2f}",
+        "建議股數": suggested,
+        "位置狀態": status,
+    }
+
+
+
 def ai_investment_summary(portfolio, ai_score, steel_score, chip_score_map):
     rows = []
 
@@ -1256,16 +1317,23 @@ def ai_investment_summary(portfolio, ai_score, steel_score, chip_score_map):
             risk_text,
         )
         progress, buy_text = buy_point_progress(stock_name, current)
+        plan = smart_trade_plan(stock_name, current, portfolio)
 
         rows.append({
             "股票": stock_name,
+            "現價": round(current, 2),
             "操作燈號": signal,
+            "加碼區": plan["加碼區"],
+            "減碼區": plan["減碼區"],
+            "位置狀態": plan["位置狀態"],
+            "建議股數": plan["建議股數"],
             "主要理由": reason,
             "買點狀態": buy_text,
             "健康度": health_display(health),
         })
 
     return pd.DataFrame(rows)
+
 
 
 def watchlist_today(portfolio, ai_score, steel_score, chip_score_map):
@@ -1443,7 +1511,41 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
     if not rows:
         rows.append({"等級": "🔵 無重大預警", "股票": "整體", "訊息": "目前沒有觸發加碼、減碼或法人異常條件", "建議": "依原策略續抱觀察"})
 
-    return pd.DataFrame(rows)
+    alert_df = pd.DataFrame(rows)
+
+    add_zones = []
+    reduce_zones = []
+    suggested_shares = []
+    position_status = []
+
+    for _, row in alert_df.iterrows():
+        stock_name = row.get("股票", "")
+        if stock_name in stock_list:
+            df_price = get_data(stock_list[stock_name], "5d")
+            if not df_price.empty:
+                current_price = float(df_price.iloc[-1]["Close"])
+                plan = smart_trade_plan(stock_name, current_price, portfolio)
+                add_zones.append(plan["加碼區"])
+                reduce_zones.append(plan["減碼區"])
+                suggested_shares.append(plan["建議股數"])
+                position_status.append(plan["位置狀態"])
+            else:
+                add_zones.append("-")
+                reduce_zones.append("-")
+                suggested_shares.append("-")
+                position_status.append("-")
+        else:
+            add_zones.append("-")
+            reduce_zones.append("-")
+            suggested_shares.append("-")
+            position_status.append("-")
+
+    alert_df["加碼區"] = add_zones
+    alert_df["減碼區"] = reduce_zones
+    alert_df["位置狀態"] = position_status
+    alert_df["建議股數"] = suggested_shares
+
+    return alert_df
 
 
 def format_line_alert_message(alert_df, ai_score, steel_score):
@@ -1557,7 +1659,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V9.3b Layout Fix
+# 分頁細節：V9.4 Trade Plan Edition
 # =====================================================
 
 tab_overview, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -1584,7 +1686,7 @@ with tab_overview:
 
     st.subheader("🚨 今日重要預警")
     if not alert_df.empty:
-        alert_cols = [c for c in ["等級", "股票", "訊息", "建議"] if c in alert_df.columns]
+        alert_cols = [c for c in ["等級", "股票", "訊息", "加碼區", "減碼區", "位置狀態", "建議股數", "建議"] if c in alert_df.columns]
         st.dataframe(alert_df[alert_cols].head(5), use_container_width=True, hide_index=True)
     else:
         st.success("目前沒有重大預警。")
@@ -1592,7 +1694,7 @@ with tab_overview:
     st.subheader("🚦 今日操作燈號")
     if not summary_df.empty:
         # 首頁只保留操作決策，買點/健康度/觀察重點留到 AI診斷中心與持股中心
-        keep_cols = [c for c in ["股票", "操作燈號", "主要理由"] if c in summary_df.columns]
+        keep_cols = [c for c in ["股票", "現價", "操作燈號", "加碼區", "減碼區", "位置狀態", "建議股數", "主要理由"] if c in summary_df.columns]
         st.dataframe(summary_df[keep_cols], use_container_width=True, hide_index=True)
 
     st.caption("持股明細請到「💰 持股中心」；健康度、買點與診斷細節請到「🧠 AI診斷中心」。")
@@ -2040,4 +2142,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 9.3b Layout Fix')
+st.caption('Version 9.4 Trade Plan Edition')
