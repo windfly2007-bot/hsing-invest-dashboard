@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.2 Stable Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.2a Decision Cards Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1287,6 +1287,85 @@ def portfolio_risk_dashboard(portfolio):
     return pd.DataFrame(rows), round(ai_pct, 1), round(steel_pct, 1), risk, note
 
 
+
+def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
+    """V10.2a 首頁決策卡：最強、最需注意、最佳加碼、禁止加碼。"""
+    rows = []
+
+    for stock_name, ticker in stock_list.items():
+        df = get_data(ticker, "1y")
+        if df.empty or len(df) < 120:
+            continue
+
+        current = float(df.iloc[-1]["Close"])
+        health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+        rule = long_term_rules[stock_name]
+        add_price = float(rule["add"])
+        reduce_price = float(rule["reduce"])
+
+        dist_add = (current - add_price) / add_price * 100 if add_price else 999
+        dist_reduce = (reduce_price - current) / current * 100 if current else 999
+
+        if health < 40:
+            action = "🔴 禁止加碼"
+        elif health < 50:
+            action = "🟠 不建議加碼"
+        elif current >= reduce_price:
+            action = "🔴 進入減碼區"
+        elif 0 <= dist_reduce <= 10:
+            action = "🟠 接近減碼區"
+        elif current <= add_price and health >= 65:
+            action = "🟢 可分批加碼"
+        elif 0 <= dist_add <= 3 and health >= 50:
+            action = "🟡 接近加碼區"
+        elif health >= 75:
+            action = "🔵 續抱"
+        else:
+            action = "🟡 觀察"
+
+        rows.append({
+            "股票": stock_name,
+            "現價": round(current, 2),
+            "AI總分": health,
+            "加碼價": add_price,
+            "減碼價": reduce_price,
+            "距加碼%": round(dist_add, 1),
+            "距減碼%": round(dist_reduce, 1),
+            "動作": action,
+        })
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return {}
+
+    # 最強個股：總分最高，若同分取法人/資料順序
+    strongest = df.sort_values(["AI總分"], ascending=False).iloc[0]
+
+    # 最需注意：優先抓接近/進入減碼區，其次抓高分但距減碼最近
+    caution_df = df[df["動作"].astype(str).str.contains("減碼", na=False)]
+    if caution_df.empty:
+        caution = df.sort_values(["距減碼%"], ascending=True).iloc[0]
+    else:
+        caution = caution_df.sort_values(["距減碼%"], ascending=True).iloc[0]
+
+    # 最佳加碼機會：分數 >=50 且最接近加碼價；若沒有就顯示目前沒有
+    add_df = df[df["AI總分"] >= 50].copy()
+    add_df = add_df[add_df["距加碼%"] <= 5]
+    best_add = add_df.sort_values(["距加碼%", "AI總分"], ascending=[True, False]).iloc[0] if not add_df.empty else None
+
+    # 禁止加碼：分數最低且低於50
+    forbidden_df = df[df["AI總分"] < 50]
+    forbidden = forbidden_df.sort_values(["AI總分"], ascending=True).iloc[0] if not forbidden_df.empty else None
+
+    return {
+        "df": df,
+        "strongest": strongest,
+        "caution": caution,
+        "best_add": best_add,
+        "forbidden": forbidden,
+    }
+
+
 def v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_score_map):
     """產生 V10 買賣計畫中心表格。"""
     rows = []
@@ -1792,7 +1871,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.2 Stable Edition
+# 分頁細節：V10.2a Decision Cards Edition
 # =====================================================
 
 tab_overview, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -1816,6 +1895,27 @@ with tab_overview:
     c4.metric("預估股息", f"{total_div:,.0f} 元")
 
     st.info(fg_text)
+
+    decision = v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map)
+    if decision:
+        strongest = decision["strongest"]
+        caution = decision["caution"]
+        best_add = decision["best_add"]
+        forbidden = decision["forbidden"]
+
+        st.subheader("🎯 今日決策卡")
+        d1, d2, d3, d4 = st.columns(4)
+        d1.success(f"🏆 最強個股\\n\\n{strongest['股票']}｜{strongest['AI總分']}分")
+        d2.warning(f"⚠️ 最需注意\\n\\n{caution['股票']}｜距減碼 {caution['距減碼%']}%")
+        if best_add is not None:
+            d3.success(f"🟢 最佳加碼\\n\\n{best_add['股票']}｜距加碼 {best_add['距加碼%']}%")
+        else:
+            d3.info("🟢 最佳加碼\\n\\n目前沒有")
+        if forbidden is not None:
+            d4.error(f"🔴 禁止加碼\\n\\n{forbidden['股票']}｜{forbidden['AI總分']}分")
+        else:
+            d4.success("🔴 禁止加碼\\n\\n目前沒有")
+
 
     st.subheader("🚨 今日重要預警")
     if not alert_df.empty:
@@ -2178,25 +2278,36 @@ with tab_ai:
 
         weak = df_decision.sort_values("總分", ascending=True).iloc[0]
 
-        c1, c2 = st.columns(2)
-        c1.success(
-            f"🎯 今日最值得關注：{focus['股票']}｜{focus['總分']}分｜{focus['AI燈號']}｜{focus['法人共振']}"
-        )
-        c2.warning(
-            f"⚠️ 最需觀察：{weak['股票']}｜{weak['總分']}分｜{weak['AI燈號']}"
-        )
+        decision = v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map)
 
-        c3, c4 = st.columns(2)
-        if reduce_item is not None:
-            c3.info(
-                f"🟠 最接近減碼：{reduce_item['股票']}｜{reduce_item['總分']}分｜{reduce_item['AI燈號']}"
+        if decision:
+            strongest = decision["strongest"]
+            caution = decision["caution"]
+            best_add = decision["best_add"]
+            forbidden = decision["forbidden"]
+
+            c1, c2 = st.columns(2)
+            c1.success(
+                f"🏆 最強個股：{strongest['股票']}｜{strongest['AI總分']}分｜{strongest['動作']}"
             )
-        else:
-            c3.info("🟠 最接近減碼：目前沒有明顯減碼訊號")
+            c2.warning(
+                f"⚠️ 最需注意：{caution['股票']}｜現價 {caution['現價']}｜距減碼 {caution['距減碼%']}%｜{caution['動作']}"
+            )
 
-        c4.success(
-            f"🏆 最穩健續抱：{stable['股票']}｜{stable['總分']}分｜{stable['AI燈號']}"
-        )
+            c3, c4 = st.columns(2)
+            if best_add is not None:
+                c3.success(
+                    f"🟢 最佳加碼機會：{best_add['股票']}｜現價 {best_add['現價']}｜加碼價 {best_add['加碼價']}｜距加碼 {best_add['距加碼%']}%"
+                )
+            else:
+                c3.info("🟢 最佳加碼機會：目前沒有明顯加碼標的")
+
+            if forbidden is not None:
+                c4.error(
+                    f"🔴 禁止加碼：{forbidden['股票']}｜{forbidden['AI總分']}分｜分數低於50"
+                )
+            else:
+                c4.success("🔴 禁止加碼：目前沒有分數低於50的標的")
     else:
         st.info("目前資料不足，無法產生AI診斷。")
 
@@ -2367,4 +2478,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 10.1 Long-Term Investor Edition')
+st.caption('Version 10.2a Decision Cards Edition')
