@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.3 Long-Term Investor Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.4 Scenario Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1814,6 +1814,103 @@ def allocation_suggestion(cash, ai_score, steel_score):
 
 
 
+
+def tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map):
+    """明日持股走勢可能劇本分析：依技術、籌碼、產業與位置區間產生多空劇本。"""
+    rows = []
+
+    for stock_name, ticker in stock_list.items():
+        if stock_name not in portfolio:
+            continue
+
+        df = get_data(ticker, "1y")
+        if df.empty or len(df) < 120:
+            continue
+
+        df = calculate_kd(df.copy())
+        df = calculate_macd(df.copy())
+
+        current = float(df.iloc[-1]["Close"])
+        prev = float(df.iloc[-2]["Close"])
+        day_pct = (current - prev) / prev * 100 if prev else 0
+
+        ma5 = float(df["Close"].rolling(5).mean().iloc[-1])
+        ma20 = float(df["Close"].rolling(20).mean().iloc[-1])
+        volume = float(df.iloc[-1]["Volume"]) if "Volume" in df.columns else 0
+        avg_volume = float(df["Volume"].tail(20).mean()) if "Volume" in df.columns else 0
+        vol_ratio = volume / avg_volume if avg_volume else 1
+
+        k_val = float(df.iloc[-1].get("K", 50))
+        d_val = float(df.iloc[-1].get("D", 50))
+        macd_val = float(df.iloc[-1].get("MACD", 0))
+        signal_val = float(df.iloc[-1].get("Signal", 0))
+
+        support, resistance = calc_support_resistance(df)
+        health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+        plan = smart_trade_plan(stock_name, current, portfolio)
+
+        rule = long_term_rules.get(stock_name, {})
+        add_price = float(rule.get("add", support))
+        reduce_price = float(rule.get("reduce", resistance))
+        dist_add = (current - add_price) / add_price * 100 if add_price else 999
+        dist_reduce = (reduce_price - current) / current * 100 if current else 999
+
+        score = 0
+        score += 2 if current > ma5 else -1
+        score += 2 if current > ma20 else -2
+        score += 1 if k_val > d_val else -1
+        score += 1 if macd_val > signal_val else -1
+        score += 1 if chip_score_map.get(stock_name, 0) >= 0 else -1
+        score += 1 if vol_ratio >= 1.2 and day_pct > 0 else 0
+        score -= 2 if health < 50 else 0
+        score -= 1 if 0 <= dist_reduce <= 5 else 0
+
+        if score >= 4:
+            bias = "🟢 偏多劇本"
+            main = "明日若量能維持，較有機會延續強勢。"
+        elif score >= 1:
+            bias = "🔵 中性偏多"
+            main = "明日大多以震盪偏多看待，適合續抱觀察。"
+        elif score >= -1:
+            bias = "🟡 震盪劇本"
+            main = "明日可能區間震盪，先看支撐是否守住。"
+        else:
+            bias = "🔴 偏弱劇本"
+            main = "明日需保守，若跌破支撐不建議急著加碼。"
+
+        bullish = f"站穩 {resistance:.2f} 且量能放大，可能續攻；長線以續抱為主。"
+        neutral = f"在 {support:.2f} ~ {resistance:.2f} 間震盪，先不追價。"
+        bearish = f"跌破 {support:.2f}，短線轉弱；若AI總分低於50則禁止加碼。"
+
+        if health < 50:
+            action = "🔴 禁止加碼，等分數回到50以上"
+        elif current >= reduce_price or (0 <= dist_reduce <= 5):
+            reduce_shares = max(1, int(portfolio[stock_name]["shares"] * 0.1))
+            action = f"🟠 接近減碼區，可觀察減碼 {reduce_shares} 股"
+        elif current <= add_price and health >= 65:
+            action = plan["建議股數"]
+        else:
+            action = "🔵 續抱，不追高"
+
+        rows.append({
+            "股票": stock_name,
+            "現價": round(current, 2),
+            "AI總分": health,
+            "明日傾向": bias,
+            "主要劇本": main,
+            "偏多條件": bullish,
+            "震盪區間": neutral,
+            "偏弱風險": bearish,
+            "支撐": support,
+            "壓力": resistance,
+            "加碼價": add_price,
+            "減碼價": reduce_price,
+            "建議動作": action,
+        })
+
+    return pd.DataFrame(rows)
+
+
 # =====================================================
 # 主畫面：V7.2 精簡版
 # =====================================================
@@ -1871,11 +1968,12 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.3 Long-Term Investor Edition
+# 分頁細節：V10.4 Scenario Edition
 # =====================================================
 
-tab_overview, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
+tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
     "📊 投資總覽",
+    "🔮 明日劇本",
     "📈 K線中心",
     "🤖 AI / 半導體市場",
     "🏗️ 鋼鐵 / 原物料",
@@ -1918,6 +2016,13 @@ with tab_overview:
             d4.success("🔴 禁止加碼：目前沒有")
 
 
+    st.subheader("🔮 明日劇本摘要")
+    scenario_preview = tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map)
+    if not scenario_preview.empty:
+        scenario_cols = [c for c in ["股票", "明日傾向", "支撐", "壓力", "建議動作"] if c in scenario_preview.columns]
+        st.dataframe(scenario_preview[scenario_cols], use_container_width=True, hide_index=True)
+
+
     st.subheader("🚨 今日重要預警")
     if not alert_df.empty:
         alert_cols = [c for c in ["等級", "股票", "訊息", "加碼區", "減碼區", "位置狀態", "建議股數", "建議"] if c in alert_df.columns]
@@ -1947,6 +2052,29 @@ with tab_overview:
 
 
     st.caption("持股明細請到「💰 持股中心」；健康度、買點與診斷細節請到「🧠 AI診斷中心」。")
+
+
+
+with tab_scenario:
+    st.subheader("🔮 明日持股走勢可能劇本分析")
+    st.caption("依技術面、籌碼面、產業溫度、支撐壓力與加碼/減碼區推估，作為長線投資輔助參考。")
+
+    scenario_df = tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map)
+
+    if not scenario_df.empty:
+        top_cols = [c for c in ["股票", "現價", "AI總分", "明日傾向", "支撐", "壓力", "加碼價", "減碼價", "建議動作"] if c in scenario_df.columns]
+        st.dataframe(scenario_df[top_cols], use_container_width=True, hide_index=True)
+
+        st.subheader("📋 個股劇本細節")
+        for _, row in scenario_df.iterrows():
+            with st.expander(f"{row['股票']}｜{row['明日傾向']}｜現價 {row['現價']}"):
+                st.markdown(f"**主要劇本：** {row['主要劇本']}")
+                st.markdown(f"**偏多條件：** {row['偏多條件']}")
+                st.markdown(f"**震盪區間：** {row['震盪區間']}")
+                st.markdown(f"**偏弱風險：** {row['偏弱風險']}")
+                st.markdown(f"**建議動作：** {row['建議動作']}")
+    else:
+        st.info("目前資料不足，無法產生明日劇本。")
 
 
 with tab_portfolio:
@@ -2315,7 +2443,7 @@ with tab_ai:
 
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V9.0 Professional Edition")
+    st.subheader("📈 個股K線分析 V10.4 Scenario Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -2480,4 +2608,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 10.3 Long-Term Investor Edition')
+st.caption('Version 10.4 Scenario Edition')
