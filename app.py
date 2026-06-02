@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.1 Long-Term Investor Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.1a Long-Term Fix Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1015,8 +1015,21 @@ def portfolio_performance_rows(portfolio, fee_discount):
             info["shares"], info["cost"], current, fee_discount
         )
 
+        if health < 40:
+            long_term_action = "🔴 禁止加碼"
+        elif health < 50:
+            long_term_action = "🟠 不建議加碼"
+        elif health < 65:
+            long_term_action = "🟡 觀察"
+        elif health < 80:
+            long_term_action = "🟢 分批加碼"
+        else:
+            long_term_action = "🟢 積極加碼"
+
         rows.append({
             "股票": stock_name,
+            "AI總分": health,
+            "長線建議": long_term_action,
             "現價": round(current, 2),
             "成本": round(info["cost"], 2),
             "股數": info["shares"],
@@ -1132,11 +1145,20 @@ def fear_greed_index(ai_score, steel_score):
 def operation_signal(stock_name, current_price, health_score, chip_score, risk_text):
     progress, buy_text = buy_point_progress(stock_name, current_price)
 
-    if "過熱" in risk_text:
-        return "🔴 減碼/停買", "高檔風險偏高"
+    # V10.1a 長線規則：AI總分低於50，禁止因為便宜就加碼
+    if health_score < 40:
+        return "🔴 禁止加碼", "AI總分低於40，需等待技術面或籌碼轉強"
+    if health_score < 50:
+        return "🟠 不建議加碼", "AI總分低於50，即使接近加碼區也先觀察"
 
-    if current_price <= long_term_rules[stock_name]["add"] and health_score >= 60:
-        return "🟢 可加碼", "進入加碼區且健康度可接受"
+    if "過熱" in risk_text:
+        return "🟠 部分獲利了結", "高檔風險偏高，長線可小幅調節"
+
+    if current_price <= long_term_rules[stock_name]["add"] and health_score >= 65:
+        return "🟢 可分批加碼", "進入加碼區且AI總分達標"
+
+    if current_price <= long_term_rules[stock_name]["add"] and health_score >= 50:
+        return "🟡 加碼觀察", "價格進入加碼區，但分數未達積極加碼"
 
     if progress >= 80 and health_score >= 75:
         return "🟢 可分批", "接近買點且健康度良好"
@@ -1147,7 +1169,8 @@ def operation_signal(stock_name, current_price, health_score, chip_score, risk_t
     if health_score >= 55:
         return "🟡 觀察", "等拉回或等籌碼轉強"
 
-    return "🔴 保守", "健康度偏弱"
+    return "🟠 不建議加碼", "健康度偏弱"
+
 
 
 def dividend_rows(portfolio):
@@ -1297,7 +1320,7 @@ def v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_scor
             continue
 
         current = float(df.iloc[-1]["Close"])
-        plan = smart_trade_plan(stock_name, current, portfolio)
+        plan = smart_trade_plan(stock_name, current, portfolio, health)
         health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
         signal, reason = operation_signal(
             stock_name,
@@ -1371,10 +1394,13 @@ def news_ai_brief(hot_rows):
     return f"{tone}｜利多 {positive} 則、利空 {negative} 則、中性 {neutral} 則。{action}"
 
 
-def smart_trade_plan(stock_name, current_price, portfolio=None):
+def smart_trade_plan(stock_name, current_price, portfolio=None, health_score=None):
     """回傳 AI 加碼區、減碼區與建議股數。"""
     if stock_name not in long_term_rules or current_price <= 0:
         return {"加碼區": "-", "減碼區": "-", "建議股數": "-", "位置狀態": "-"}
+
+    # V10.1a：AI總分低於50時，禁止加碼，但仍允許減碼提示
+    block_add = health_score is not None and health_score < 50
 
     rule = long_term_rules[stock_name]
     strong_add = float(rule["strong_add"])
@@ -1396,16 +1422,28 @@ def smart_trade_plan(stock_name, current_price, portfolio=None):
 
     if current_price <= add_low:
         add_shares = int(strong_add_budget // current_price)
-        status = "🟢 強力加碼區"
-        suggested = f"建議加碼 {add_shares} 股"
+        if block_add:
+            status = "🔴 禁止加碼區"
+            suggested = "🔴 禁止加碼(總分過低)"
+        else:
+            status = "🟢 強力加碼區"
+            suggested = f"建議加碼 {add_shares} 股"
     elif current_price <= add_high:
         add_shares = int(add_budget // current_price)
-        status = "🟢 加碼區"
-        suggested = f"建議加碼 {add_shares} 股"
+        if block_add:
+            status = "🔴 禁止加碼區"
+            suggested = "🔴 禁止加碼(總分過低)"
+        else:
+            status = "🟢 加碼區"
+            suggested = f"建議加碼 {add_shares} 股"
     elif current_price <= add_high * 1.03:
         add_shares = int((add_budget * 0.5) // current_price)
-        status = "🟡 接近加碼區"
-        suggested = f"可觀察加碼 {add_shares} 股"
+        if block_add:
+            status = "🟠 不建議加碼"
+            suggested = "🟠 不建議加碼(總分低於50)"
+        else:
+            status = "🟡 接近加碼區"
+            suggested = f"可觀察加碼 {add_shares} 股"
     elif current_price >= reduce_high:
         reduce_shares = max(1, int(held_shares * 0.30)) if held_shares else 0
         status = "🔴 高於減碼區"
@@ -1450,7 +1488,7 @@ def ai_investment_summary(portfolio, ai_score, steel_score, chip_score_map):
             risk_text,
         )
         progress, buy_text = buy_point_progress(stock_name, current)
-        plan = smart_trade_plan(stock_name, current, portfolio)
+        plan = smart_trade_plan(stock_name, current, portfolio, health)
 
         rows.append({
             "股票": stock_name,
@@ -1610,12 +1648,16 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
         add_gap = (current - rule["add"]) / current * 100 if current else 999
         reduce_gap = (rule["reduce"] - current) / current * 100 if current else 999
 
-        if current <= rule["strong_add"]:
-            rows.append({"等級": "🟢 強力買點", "股票": stock_name, "訊息": f"現價 {current:.2f} 已低於強力加碼價 {rule['strong_add']}", "建議": "可分批加碼，不一次買滿"})
+        if health < 50 and current <= rule["add"]:
+            rows.append({"等級": "🔴 禁止加碼", "股票": stock_name, "訊息": f"AI總分 {health} 低於50，雖然現價 {current:.2f} 接近/進入加碼區", "建議": "禁止加碼，等待技術面或籌碼轉強"})
+        elif current <= rule["strong_add"]:
+            rows.append({"等級": "🟢 強力買點", "股票": stock_name, "訊息": f"現價 {current:.2f} 已低於強力加碼價 {rule['strong_add']}，AI總分 {health}", "建議": "可分批加碼，不一次買滿"})
         elif current <= rule["add"]:
-            rows.append({"等級": "🟢 加碼區", "股票": stock_name, "訊息": f"現價 {current:.2f} 已進入加碼價 {rule['add']} 附近", "建議": "可小量分批"})
+            rows.append({"等級": "🟢 加碼區", "股票": stock_name, "訊息": f"現價 {current:.2f} 已進入加碼價 {rule['add']} 附近，AI總分 {health}", "建議": "可小量分批"})
+        elif 0 < add_gap <= 2 and health < 50:
+            rows.append({"等級": "🟠 不建議加碼", "股票": stock_name, "訊息": f"距離加碼價約 {add_gap:.2f}%，但AI總分 {health} 低於50", "建議": "先觀察，不加碼"})
         elif 0 < add_gap <= 2:
-            rows.append({"等級": "🟡 接近買點", "股票": stock_name, "訊息": f"距離加碼價約 {add_gap:.2f}%", "建議": "加入觀察，等待拉回"})
+            rows.append({"等級": "🟡 接近買點", "股票": stock_name, "訊息": f"距離加碼價約 {add_gap:.2f}%，AI總分 {health}", "建議": "加入觀察，等待拉回"})
 
         if current >= rule["reduce"] or "過熱" in risk_text:
             rows.append({"等級": "🔴 高檔風險", "股票": stock_name, "訊息": f"現價 {current:.2f}｜{risk_text}", "建議": "停止追高，必要時小幅減碼"})
@@ -1657,7 +1699,9 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
             df_price = get_data(stock_list[stock_name], "5d")
             if not df_price.empty:
                 current_price = float(df_price.iloc[-1]["Close"])
-                plan = smart_trade_plan(stock_name, current_price, portfolio)
+                df_health = get_data(stock_list[stock_name], "1y")
+                health_alert = score_stock(stock_name, df_health, ai_score, steel_score, chip_score_map.get(stock_name, 0)) if not df_health.empty else 50
+                plan = smart_trade_plan(stock_name, current_price, portfolio, health_alert)
                 add_zones.append(plan["加碼區"])
                 reduce_zones.append(plan["減碼區"])
                 suggested_shares.append(plan["建議股數"])
@@ -1792,7 +1836,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.1 Long-Term Investor Edition
+# 分頁細節：V10.1a Long-Term Fix Edition
 # =====================================================
 
 tab_overview, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2367,4 +2411,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 10.1 Long-Term Investor Edition')
+st.caption('Version 10.1a Long-Term Fix Edition')
