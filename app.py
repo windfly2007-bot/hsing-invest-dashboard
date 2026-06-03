@@ -12,7 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V11.1 Unified Score Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V11.2 Stable Unified Score Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -153,7 +153,7 @@ hr {
 }
 
 
-/* V11.1 Unified Score Edition */
+/* V11.2 Stable Unified Score Edition */
 .wrapped-table-card {
     background: #ffffff;
     border: 1px solid #e5e7eb;
@@ -517,13 +517,22 @@ def calculate_macd(df):
     return df
 
 def calc_support_resistance(df):
+    """近期支撐/壓力。若股價創高，壓力改用延伸目標，避免壓力直接等於現價。"""
     recent = df.tail(20)
-    current = recent.iloc[-1]["Close"]
+    current = float(recent.iloc[-1]["Close"])
+
     support_candidates = recent[recent["Low"] < current]["Low"]
+    support = float(support_candidates.max()) if not support_candidates.empty else float(recent["Low"].min())
+
     resistance_candidates = recent[recent["High"] > current]["High"]
-    support = support_candidates.max() if not support_candidates.empty else recent["Low"].min()
-    resistance = resistance_candidates.min() if not resistance_candidates.empty else recent["High"].max()
+    if not resistance_candidates.empty:
+        resistance = float(resistance_candidates.min())
+    else:
+        recent_high = float(recent["High"].max())
+        resistance = max(recent_high, current * 1.03)
+
     return round(support, 2), round(resistance, 2)
+
 
 
 def calc_net_profit(shares, cost_price, current_price, fee_discount):
@@ -2186,7 +2195,7 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
 
         current = float(get_display_price(ticker, df))
         rule = long_term_rules[stock_name]
-        health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+        health = get_unified_score_value(stock_name, ticker, df, ai_score, steel_score, chip_score_map)
         distance, risk_text = risk_distance_from_ma(df)
         progress, buy_text = buy_point_progress(stock_name, current)
         add_gap = (current - rule["add"]) / current * 100 if current else 999
@@ -2372,12 +2381,16 @@ def tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map):
         signal_val = float(df.iloc[-1].get("Signal", 0))
 
         support, resistance = calc_support_resistance(df)
-        health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
-        plan = smart_trade_plan(stock_name, current, portfolio, is_strong_trend_hold(stock_name, df, current, health, chip_score_map.get(stock_name, 0)))
+        health = get_unified_score_value(stock_name, ticker, df, ai_score, steel_score, chip_score_map)
 
         rule = long_term_rules.get(stock_name, {})
         add_price = float(rule.get("add", support))
         reduce_price = float(rule.get("reduce", resistance))
+        # 劇本頁壓力：技術壓力與減碼價取較高，創高時避免壓力直接等於現價
+        resistance = round(max(float(resistance), reduce_price, current * 1.03), 2)
+
+        plan = smart_trade_plan(stock_name, current, portfolio, is_strong_trend_hold(stock_name, df, current, health, chip_score_map.get(stock_name, 0)))
+
         dist_add = (current - add_price) / add_price * 100 if add_price else 999
         dist_reduce = (reduce_price - current) / current * 100 if current else 999
 
@@ -2429,10 +2442,15 @@ def tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map):
         else:
             action = "🔵 續抱，不追高"
 
+        score_detail = calc_unified_ai_score(stock_name, ticker, df, ai_score, steel_score, chip_score_map)
+
         rows.append({
             "股票": stock_name,
             "現價": round(current, 2),
             "AI總分": health,
+            "技術面": f"{score_detail['tech_part']}/40",
+            "籌碼面": f"{score_detail['chip_part']}/30",
+            "產業面": f"{score_detail['industry_part']}/30",
             "明日傾向": bias,
             "主要劇本": main,
             "偏多條件": bullish,
@@ -2580,7 +2598,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V11.1 Unified Score Edition
+# 分頁細節：V11.2 Stable Unified Score Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2716,24 +2734,28 @@ with tab_overview:
 
 with tab_scenario:
     st.subheader("🔮 明日持股走勢可能劇本分析")
+    st.caption("V11.2：本頁 AI總分已與 AI診斷中心統一，皆為 技術面40 + 籌碼面30 + 產業面30。")
     st.caption("現價優先抓取最新/最後成交價；依技術面、籌碼面、產業溫度、支撐壓力與加碼/減碼區推估，作為長線投資輔助參考。")
 
     scenario_df = tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map)
 
     if not scenario_df.empty:
-        top_cols = [c for c in ["股票", "現價", "AI總分", "明日傾向", "支撐", "壓力", "加碼價", "減碼價", "建議動作"] if c in scenario_df.columns]
+        top_cols = [c for c in ["股票", "現價", "AI總分", "技術面", "籌碼面", "產業面", "明日傾向", "支撐", "壓力", "加碼價", "減碼價", "建議動作"] if c in scenario_df.columns]
         render_wrapped_table(
             scenario_df[top_cols],
             column_widths={
-                "股票": "8%",
-                "現價": "8%",
-                "AI總分": "8%",
-                "明日傾向": "13%",
-                "支撐": "8%",
-                "壓力": "8%",
-                "加碼價": "9%",
-                "減碼價": "9%",
-                "建議動作": "29%",
+                "股票": "7%",
+                "現價": "7%",
+                "AI總分": "7%",
+                "技術面": "7%",
+                "籌碼面": "7%",
+                "產業面": "7%",
+                "明日傾向": "10%",
+                "支撐": "7%",
+                "壓力": "7%",
+                "加碼價": "7%",
+                "減碼價": "7%",
+                "建議動作": "20%",
             },
         )
 
@@ -2749,7 +2771,7 @@ with tab_scenario:
         st.info("目前資料不足，無法產生明日劇本。")
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V11.1 Unified Score Edition")
+    st.subheader("📈 個股K線分析 V11.2 Stable Unified Score Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -2767,7 +2789,7 @@ with tab_chart:
         df["MA20"] = df["Close"].rolling(20).mean()
 
         support, resistance = calc_support_resistance(df)
-        current_price = float(df.iloc[-1]["Close"])
+        current_price = float(get_display_price(stock_list[selected_stock], df))
         latest_k = float(df["K"].dropna().iloc[-1]) if df["K"].notna().sum() else 50
         latest_d = float(df["D"].dropna().iloc[-1]) if df["D"].notna().sum() else 50
         latest_macd = float(df["MACD"].dropna().iloc[-1]) if df["MACD"].notna().sum() else 0
@@ -2917,7 +2939,7 @@ with tab_chart:
         # V10.8：AI分數計算細節，讓使用者知道為什麼是續抱/不追高/減碼觀察
         detail_df = get_data(stock_list[selected_stock], "1y")
         if not detail_df.empty and len(detail_df) >= 120:
-            health = score_stock(selected_stock, detail_df, ai_score, steel_score, chip_score_map.get(selected_stock, 0))
+            health = get_unified_score_value(selected_stock, stock_list[selected_stock], detail_df, ai_score, steel_score, chip_score_map)
             trend_score, trend_detail = get_trend_score_details(detail_df, chip_score_map.get(selected_stock, 0))
             distance, risk_text = risk_distance_from_ma(detail_df)
             rule = long_term_rules[selected_stock]
@@ -2957,7 +2979,7 @@ with tab_chart:
                 若是「強勢股創高 + 均線多頭 + 法人仍偏多」，系統會顯示 **強勢續抱 / 不追高**。
                 """)
 
-st.caption('Version 11.1 Unified Score Edition')
+st.caption('Version 11.2 Stable Unified Score Edition')
 
 with tab_ai_market:
     st.subheader("🤖 AI / 半導體市場")
@@ -3099,6 +3121,7 @@ with tab_news:
 
 with tab_ai:
     st.subheader("🤖 AI診斷中心")
+    st.caption("V11.2：AI總分唯一來源 = 技術面40 + 籌碼面30 + 產業面30。")
 
     diagnosis_rows = []
     for stock_name, ticker in stock_list.items():
