@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.7 AI Score Explain Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.8 Signal Consistency Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -526,7 +526,7 @@ def score_stock(stock_name, df, ai_score, steel_score, chip_score_20=0):
 
     distance, _ = risk_distance_from_ma(df)
     if distance is not None:
-        # V10.7：風險扣分改輕。強勢股創高時不應被大幅扣分。
+        # V10.8：風險扣分改輕。強勢股創高時不應被大幅扣分。
         # 真正需要減碼的是「過熱 + 趨勢轉弱」，不是單純過熱。
         if distance >= 60:
             score -= 6
@@ -541,7 +541,7 @@ def score_stock(stock_name, df, ai_score, steel_score, chip_score_20=0):
 
 
 def get_trend_score_details(df, chip_score_20=0):
-    """V10.7 趨勢分數：用來區分「強勢過熱」與「弱勢過熱」。"""
+    """V10.8 趨勢分數：用來區分「強勢過熱」與「弱勢過熱」。"""
     if df.empty or len(df) < 120:
         return 0, {"狀態": "資料不足"}
 
@@ -583,7 +583,7 @@ def get_trend_score_details(df, chip_score_20=0):
 
 
 def action_by_heat_and_trend(current, reduce_price, health, trend_score, risk_text):
-    """V10.7 動作判斷：過熱不等於減碼，強勢過熱改為續抱不追高。"""
+    """V10.8 動作判斷：過熱不等於減碼，強勢過熱改為續抱不追高。"""
     if health < 40:
         return "🔴 禁止加碼"
     if health < 50:
@@ -1347,7 +1347,7 @@ def fear_greed_index(ai_score, steel_score):
 def operation_signal(stock_name, current_price, health_score, chip_score, risk_text):
     progress, buy_text = buy_point_progress(stock_name, current_price)
 
-    # V10.7：過熱不等於減碼。
+    # V10.8：過熱不等於減碼。
     # 高分 + 籌碼不差時，過熱只提醒「續抱、不追高」。
     if "極強趨勢" in str(risk_text) or "過熱" in str(risk_text):
         if health_score >= 75 and chip_score >= 0:
@@ -1539,7 +1539,7 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
         elif 0 <= dist_reduce <= 10 and health < 70:
             action = "🟠 接近減碼區"
 
-        # V10.7 第一梯隊排序：AI總分 + 趨勢分數為主。
+        # V10.8 第一梯隊排序：AI總分 + 趨勢分數為主。
         # 強勢過熱加分，不直接扣成「最需注意」。
         rank_score = health + trend_score * 0.35
         if is_breakout:
@@ -1553,7 +1553,7 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
         if trend_score < 35:
             rank_score -= 8
 
-        # V10.7 最需注意：只抓「低分、趨勢轉弱、過熱轉弱」。
+        # V10.8 最需注意：只抓「低分、趨勢轉弱、過熱轉弱」。
         # 高分創高只列「不追高」，不列為最危險。
         caution_score = 0
         if health < 50:
@@ -1629,7 +1629,7 @@ def v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_scor
             continue
 
         current = float(get_display_price(ticker, df))
-        plan = smart_trade_plan(stock_name, current, portfolio)
+        plan = smart_trade_plan(stock_name, current, portfolio, is_strong_trend_hold(stock_name, df, current, health, chip_score_map.get(stock_name, 0)))
         health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
         signal, reason = operation_signal(
             stock_name,
@@ -1703,8 +1703,66 @@ def news_ai_brief(hot_rows):
     return f"{tone}｜利多 {positive} 則、利空 {negative} 則、中性 {neutral} 則。{action}"
 
 
-def smart_trade_plan(stock_name, current_price, portfolio=None):
-    """回傳 AI 加碼區、減碼區與建議股數。"""
+
+def is_strong_trend_hold(stock_name, df, current_price, health_score, chip_score=0):
+    """V10.8 強勢股保護：高分、均線多頭、創高或接近新高時，不直接給減碼股數。"""
+    if df is None or df.empty or len(df) < 60:
+        return False
+
+    try:
+        close = float(current_price)
+        ma5 = float(df["Close"].rolling(5).mean().iloc[-1])
+        ma10 = float(df["Close"].rolling(10).mean().iloc[-1])
+        ma20 = float(df["Close"].rolling(20).mean().iloc[-1])
+        high60 = float(df["Close"].tail(60).max())
+        near_high = close >= high60 * 0.98
+        ma_bull = close > ma5 > ma10 > ma20
+        return health_score >= 75 and ma_bull and near_high and chip_score >= -1
+    except Exception:
+        return False
+
+
+def alert_priority(level_text):
+    """讓同一股票同時有高檔與法人訊號時，保留最有決策價值的訊號。"""
+    txt = str(level_text)
+    if "禁止加碼" in txt or "法人轉弱" in txt or "跌破成本" in txt:
+        return 90
+    if "高檔風險" in txt:
+        return 80
+    if "強勢續抱" in txt or "強勢偏熱" in txt:
+        return 75
+    if "接近減碼" in txt:
+        return 70
+    if "強力買點" in txt or "加碼區" in txt:
+        return 65
+    if "接近買點" in txt:
+        return 55
+    if "法人轉強" in txt:
+        return 45
+    if "接近成本" in txt:
+        return 40
+    return 10
+
+
+def dedupe_alerts_by_stock(rows):
+    """避免同一股票一邊顯示減碼、一邊又顯示續抱/法人轉強。每檔保留最高優先級訊號。"""
+    if not rows:
+        return rows
+    best = {}
+    others = []
+    for row in rows:
+        stock = row.get("股票", "")
+        if stock == "整體市場" or stock == "整體":
+            others.append(row)
+            continue
+        score = alert_priority(row.get("等級", ""))
+        if stock not in best or score > best[stock][0]:
+            best[stock] = (score, row)
+    return others + [item[1] for item in best.values()]
+
+
+def smart_trade_plan(stock_name, current_price, portfolio=None, strong_trend_hold=False):
+    """回傳 AI 加碼區、減碼區與建議股數。V10.8：強勢股過熱不等於減碼。"""
     if stock_name not in long_term_rules or current_price <= 0:
         return {"加碼區": "-", "減碼區": "-", "建議股數": "-", "位置狀態": "-"}
 
@@ -1739,17 +1797,29 @@ def smart_trade_plan(stock_name, current_price, portfolio=None):
         status = "🟡 接近加碼區"
         suggested = f"可觀察加碼 {add_shares} 股"
     elif current_price >= reduce_high:
-        reduce_shares = max(1, int(held_shares * 0.30)) if held_shares else 0
-        status = "🔴 高於減碼區"
-        suggested = f"建議減碼 {reduce_shares} 股" if reduce_shares else "無持股可減碼"
+        if strong_trend_hold:
+            status = "🟠 強勢高檔續抱區"
+            suggested = "暫不減碼，續抱不追高"
+        else:
+            reduce_shares = max(1, int(held_shares * 0.30)) if held_shares else 0
+            status = "🔴 高於減碼區"
+            suggested = f"建議減碼 {reduce_shares} 股" if reduce_shares else "無持股可減碼"
     elif current_price >= reduce_low:
-        reduce_shares = max(1, int(held_shares * 0.20)) if held_shares else 0
-        status = "🟠 減碼區"
-        suggested = f"建議減碼 {reduce_shares} 股" if reduce_shares else "無持股可減碼"
+        if strong_trend_hold:
+            status = "🟠 強勢偏熱續抱區"
+            suggested = "暫不減碼，續抱不追高"
+        else:
+            reduce_shares = max(1, int(held_shares * 0.20)) if held_shares else 0
+            status = "🟠 減碼區"
+            suggested = f"建議減碼 {reduce_shares} 股" if reduce_shares else "無持股可減碼"
     elif current_price >= reduce_low * 0.97:
-        reduce_shares = max(1, int(held_shares * 0.10)) if held_shares else 0
-        status = "🟠 接近減碼區"
-        suggested = f"可觀察減碼 {reduce_shares} 股" if reduce_shares else "無持股可減碼"
+        if strong_trend_hold:
+            status = "🟠 接近減碼但趨勢強"
+            suggested = "暫不減碼，觀察支撐"
+        else:
+            reduce_shares = max(1, int(held_shares * 0.10)) if held_shares else 0
+            status = "🟠 接近減碼區"
+            suggested = f"可觀察減碼 {reduce_shares} 股" if reduce_shares else "無持股可減碼"
     else:
         status = "🔵 續抱區"
         suggested = "暫不加減碼"
@@ -1760,6 +1830,7 @@ def smart_trade_plan(stock_name, current_price, portfolio=None):
         "建議股數": suggested,
         "位置狀態": status,
     }
+
 
 
 
@@ -1782,7 +1853,7 @@ def ai_investment_summary(portfolio, ai_score, steel_score, chip_score_map):
             risk_text,
         )
         progress, buy_text = buy_point_progress(stock_name, current)
-        plan = smart_trade_plan(stock_name, current, portfolio)
+        plan = smart_trade_plan(stock_name, current, portfolio, is_strong_trend_hold(stock_name, df, current, health, chip_score_map.get(stock_name, 0)))
 
         rows.append({
             "股票": stock_name,
@@ -1941,6 +2012,8 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
         progress, buy_text = buy_point_progress(stock_name, current)
         add_gap = (current - rule["add"]) / current * 100 if current else 999
         reduce_gap = (rule["reduce"] - current) / current * 100 if current else 999
+        chip_score = chip_score_map.get(stock_name, 0)
+        strong_hold = is_strong_trend_hold(stock_name, df, current, health, chip_score)
 
         if current <= rule["strong_add"]:
             rows.append({"等級": "🟢 強力買點", "股票": stock_name, "訊息": f"現價 {current:.2f} 已低於強力加碼價 {rule['strong_add']}", "建議": "可分批加碼，不一次買滿"})
@@ -1949,8 +2022,22 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
         elif 0 < add_gap <= 2:
             rows.append({"等級": "🟡 接近買點", "股票": stock_name, "訊息": f"距離加碼價約 {add_gap:.2f}%", "建議": "加入觀察，等待拉回"})
 
-        if current >= rule["reduce"] or "過熱" in risk_text:
-            rows.append({"等級": "🔴 高檔風險", "股票": stock_name, "訊息": f"現價 {current:.2f}｜{risk_text}", "建議": "續抱但不追高，若部位過大再小幅調節"})
+        # V10.8：高檔訊號與法人訊號統一，不再同檔股票一邊減碼一邊續抱。
+        if current >= rule["reduce"] or "過熱" in str(risk_text) or "極強趨勢" in str(risk_text):
+            if strong_hold:
+                rows.append({
+                    "等級": "🟠 強勢續抱",
+                    "股票": stock_name,
+                    "訊息": f"現價 {current:.2f}｜{risk_text}｜均線多頭且接近新高",
+                    "建議": "續抱但不追高；只有跌破支撐或法人轉弱才考慮減碼"
+                })
+            else:
+                rows.append({
+                    "等級": "🔴 高檔風險",
+                    "股票": stock_name,
+                    "訊息": f"現價 {current:.2f}｜{risk_text}",
+                    "建議": "若趨勢轉弱或法人轉賣，可小幅調節"
+                })
         elif 0 < reduce_gap <= 3:
             rows.append({"等級": "🟠 接近減碼區", "股票": stock_name, "訊息": f"距離減碼價約 {reduce_gap:.2f}%", "建議": "續抱但不追價"})
 
@@ -1959,10 +2046,13 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
         foreign_sell = calc_consecutive_sell_days(stock_name, ["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"])
         trust_sell = calc_consecutive_sell_days(stock_name, ["投信", "Investment", "Investment_Trust"])
 
-        if foreign_buy >= 5 or trust_buy >= 5:
-            rows.append({"等級": "🟢 法人轉強", "股票": stock_name, "訊息": f"外資連買 {foreign_buy} 天｜投信連買 {trust_buy} 天", "建議": "籌碼偏多，可列入優先觀察"})
         if foreign_sell >= 5 or trust_sell >= 5:
             rows.append({"等級": "🔴 法人轉弱", "股票": stock_name, "訊息": f"外資連賣 {foreign_sell} 天｜投信連賣 {trust_sell} 天", "建議": "暫緩加碼，觀察是否止賣"})
+        elif foreign_buy >= 5 or trust_buy >= 5:
+            if current >= rule["reduce"] and strong_hold:
+                rows.append({"等級": "🟠 強勢續抱", "股票": stock_name, "訊息": f"外資連買 {foreign_buy} 天｜投信連買 {trust_buy} 天｜高檔但籌碼仍偏多", "建議": "籌碼偏多，續抱不追高"})
+            else:
+                rows.append({"等級": "🟢 法人轉強", "股票": stock_name, "訊息": f"外資連買 {foreign_buy} 天｜投信連買 {trust_buy} 天", "建議": "籌碼偏多，可列入優先觀察"})
 
         if stock_name in portfolio:
             cost = float(portfolio[stock_name]["cost"])
@@ -1976,6 +2066,7 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
     if not rows:
         rows.append({"等級": "🔵 無重大預警", "股票": "整體", "訊息": "目前沒有觸發加碼、減碼或法人異常條件", "建議": "依原策略續抱觀察"})
 
+    rows = dedupe_alerts_by_stock(rows)
     alert_df = pd.DataFrame(rows)
 
     add_zones = []
@@ -1986,10 +2077,12 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
     for _, row in alert_df.iterrows():
         stock_name = row.get("股票", "")
         if stock_name in stock_list:
-            df_price = get_data(stock_list[stock_name], "5d")
+            df_price = get_data(stock_list[stock_name], "1y")
             if not df_price.empty:
-                current_price = float(df_price.iloc[-1]["Close"])
-                plan = smart_trade_plan(stock_name, current_price, portfolio)
+                current_price = float(get_display_price(stock_list[stock_name], df_price))
+                health = score_stock(stock_name, df_price, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+                strong_hold = is_strong_trend_hold(stock_name, df_price, current_price, health, chip_score_map.get(stock_name, 0))
+                plan = smart_trade_plan(stock_name, current_price, portfolio, strong_hold)
                 add_zones.append(plan["加碼區"])
                 reduce_zones.append(plan["減碼區"])
                 suggested_shares.append(plan["建議股數"])
@@ -2011,6 +2104,7 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
     alert_df["建議股數"] = suggested_shares
 
     return alert_df
+
 
 
 def format_line_alert_message(alert_df, ai_score, steel_score):
@@ -2100,7 +2194,7 @@ def tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map):
 
         support, resistance = calc_support_resistance(df)
         health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
-        plan = smart_trade_plan(stock_name, current, portfolio)
+        plan = smart_trade_plan(stock_name, current, portfolio, is_strong_trend_hold(stock_name, df, current, health, chip_score_map.get(stock_name, 0)))
 
         rule = long_term_rules.get(stock_name, {})
         add_price = float(rule.get("add", support))
@@ -2299,7 +2393,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.7 AI Score Explain Edition
+# 分頁細節：V10.8 Signal Consistency Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2780,7 +2874,7 @@ with tab_ai:
 
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V10.7 AI Score Explain Edition")
+    st.subheader("📈 個股K線分析 V10.8 Signal Consistency Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -2945,7 +3039,7 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-        # V10.7：AI分數計算細節，讓使用者知道為什麼是續抱/不追高/減碼觀察
+        # V10.8：AI分數計算細節，讓使用者知道為什麼是續抱/不追高/減碼觀察
         detail_df = get_data(stock_list[selected_stock], "1y")
         if not detail_df.empty and len(detail_df) >= 120:
             health = score_stock(selected_stock, detail_df, ai_score, steel_score, chip_score_map.get(selected_stock, 0))
@@ -2988,4 +3082,4 @@ with tab_chart:
                 若是「強勢股創高 + 均線多頭 + 法人仍偏多」，系統會顯示 **強勢續抱 / 不追高**。
                 """)
 
-st.caption('Version 10.7 Trend Friendly Long-Term Edition')
+st.caption('Version 10.8 Signal Consistency Edition')
