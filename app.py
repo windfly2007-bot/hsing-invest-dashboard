@@ -12,7 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V11.2 Stable Unified Score Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V11.2a Table Display Fix Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -153,7 +153,7 @@ hr {
 }
 
 
-/* V11.2 Stable Unified Score Edition */
+/* V11.2a Table Display Fix Edition */
 .wrapped-table-card {
     background: #ffffff;
     border: 1px solid #e5e7eb;
@@ -218,7 +218,7 @@ hr {
 
 
 def render_wrapped_table(df, column_widths=None, max_rows=None):
-    """顯示可換行的表格，避免 Streamlit dataframe 文字被截斷。"""
+    """顯示可讀表格：保留換行，但避免數字/文字被切成直排。"""
     if df is None or df.empty:
         st.info("目前沒有資料。")
         return
@@ -228,19 +228,7 @@ def render_wrapped_table(df, column_widths=None, max_rows=None):
         if max_rows is not None:
             show_df = show_df.head(max_rows)
 
-        column_widths = column_widths or {}
-
-        colgroup = ""
-        if column_widths:
-            colgroup = "<colgroup>"
-            for col in show_df.columns:
-                width = column_widths.get(col, None)
-                if width:
-                    colgroup += f'<col style="width:{width};">'
-                else:
-                    colgroup += "<col>"
-            colgroup += "</colgroup>"
-
+        # V11.2a：不再使用百分比固定欄寬，避免畫面太窄時文字直排。
         header = "".join(f"<th>{html.escape(str(col))}</th>" for col in show_df.columns)
         body_rows = []
 
@@ -257,7 +245,6 @@ def render_wrapped_table(df, column_widths=None, max_rows=None):
         table_html = f"""
         <div class="wrapped-table-card">
             <table class="wrapped-table">
-                {colgroup}
                 <thead><tr>{header}</tr></thead>
                 <tbody>{''.join(body_rows)}</tbody>
             </table>
@@ -265,7 +252,7 @@ def render_wrapped_table(df, column_widths=None, max_rows=None):
         """
         st.markdown(table_html, unsafe_allow_html=True)
     except Exception:
-        st.dataframe(df if max_rows is None else df.head(max_rows), use_container_width=True, hide_index=True)
+        st.dataframe(show_df, use_container_width=True, hide_index=True)
 
 
 def render_section_title(title, note=None):
@@ -2598,7 +2585,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V11.2 Stable Unified Score Edition
+# 分頁細節：V11.2a Table Display Fix Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2706,7 +2693,7 @@ with tab_overview:
     st.subheader("🎯 V10 今日買賣計畫")
     trade_plan_df = v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_score_map)
     if not trade_plan_df.empty:
-        compact_cols = [c for c in ["股票", "現價", "AI燈號", "加碼區", "建議加碼", "減碼區", "建議減碼", "位置狀態"] if c in trade_plan_df.columns]
+        compact_cols = [c for c in ["股票", "現價", "AI燈號", "位置狀態", "建議加碼", "建議減碼"] if c in trade_plan_df.columns]
         render_wrapped_table(
             trade_plan_df[compact_cols],
             column_widths={
@@ -2740,7 +2727,7 @@ with tab_scenario:
     scenario_df = tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map)
 
     if not scenario_df.empty:
-        top_cols = [c for c in ["股票", "現價", "AI總分", "技術面", "籌碼面", "產業面", "明日傾向", "支撐", "壓力", "加碼價", "減碼價", "建議動作"] if c in scenario_df.columns]
+        top_cols = [c for c in ["股票", "現價", "AI總分", "技術面", "籌碼面", "產業面", "明日傾向", "支撐", "壓力", "建議動作"] if c in scenario_df.columns]
         render_wrapped_table(
             scenario_df[top_cols],
             column_widths={
@@ -2771,7 +2758,7 @@ with tab_scenario:
         st.info("目前資料不足，無法產生明日劇本。")
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V11.2 Stable Unified Score Edition")
+    st.subheader("📈 個股K線分析 V11.2a Table Display Fix Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -2979,7 +2966,7 @@ with tab_chart:
                 若是「強勢股創高 + 均線多頭 + 法人仍偏多」，系統會顯示 **強勢續抱 / 不追高**。
                 """)
 
-st.caption('Version 11.2 Stable Unified Score Edition')
+st.caption('Version 11.2a Table Display Fix Edition')
 
 with tab_ai_market:
     st.subheader("🤖 AI / 半導體市場")
