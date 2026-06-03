@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.5b Price Function Fix Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.6 Trend Friendly Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -476,10 +476,14 @@ def risk_distance_from_ma(df):
     ma120 = df["Close"].rolling(120).mean().iloc[-1]
     distance = (close - ma120) / ma120 * 100
 
-    if distance >= 35:
-        level = "🔴 過熱，停止加碼，可考慮小幅減碼"
+    # V10.6：長線模式改為「趨勢友善」。
+    # 強勢創高不直接判定風險過高，只提醒不要追價。
+    if distance >= 50:
+        level = "🟠 極強趨勢，過熱觀察，不追價"
+    elif distance >= 35:
+        level = "🟡 強勢偏熱，續抱但不追高"
     elif distance >= 25:
-        level = "🟡 偏熱，不追高"
+        level = "🔵 強勢趨勢，續抱觀察"
     elif distance >= 10:
         level = "🔵 正常偏強，續抱"
     elif distance >= -5:
@@ -522,10 +526,12 @@ def score_stock(stock_name, df, ai_score, steel_score, chip_score_20=0):
 
     distance, _ = risk_distance_from_ma(df)
     if distance is not None:
-        if distance >= 35:
-            score -= 15
-        elif distance >= 25:
+        # V10.6：避免強勢股創高時被扣太重。
+        # 25~50% 只視為強勢延伸，不大幅扣分；50%以上才小扣。
+        if distance >= 60:
             score -= 8
+        elif distance >= 50:
+            score -= 4
         elif distance <= -5:
             score += 8
 
@@ -993,7 +999,7 @@ def weekly_strategy(stock_name, current_price, health_score, chip_score, risk_te
     stock_type = long_term_rules[stock_name]["type"]
 
     if "過熱" in risk_text:
-        return "🔴 停止加碼", "高檔風險偏高，避免追價"
+        return "🔴 停止加碼", "強勢偏熱，續抱但不追高，避免追價"
 
     if current_price <= long_term_rules[stock_name]["add"]:
         return "🟢 分批加碼", "價格進入加碼區"
@@ -1276,8 +1282,10 @@ def fear_greed_index(ai_score, steel_score):
 def operation_signal(stock_name, current_price, health_score, chip_score, risk_text):
     progress, buy_text = buy_point_progress(stock_name, current_price)
 
+    if "極強趨勢" in risk_text:
+        return "🟠 續抱不追高", "趨勢很強但乖離偏大，長線先續抱"
     if "過熱" in risk_text:
-        return "🔴 減碼/停買", "高檔風險偏高"
+        return "🟠 部分獲利觀察", "高檔乖離偏大，可觀察是否需要小幅調節"
 
     if current_price <= long_term_rules[stock_name]["add"] and health_score >= 60:
         return "🟢 可加碼", "進入加碼區且健康度可接受"
@@ -1433,7 +1441,7 @@ def portfolio_risk_dashboard(portfolio):
 
 
 def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
-    """V10.3 首頁決策卡：第一梯隊、最需注意、最佳加碼、禁止加碼。"""
+    """V10.6 首頁決策卡：趨勢友善版。第一梯隊重視總分與續抱，不讓平盤股因低風險排太前。"""
     rows = []
 
     for stock_name, ticker in stock_list.items():
@@ -1450,12 +1458,16 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
         dist_add = (current - add_price) / add_price * 100 if add_price else 999
         dist_reduce = (reduce_price - current) / current * 100 if current else 999
 
+        distance, risk_text = risk_distance_from_ma(df)
+        is_breakout = current >= float(df["Close"].tail(60).max()) * 0.99
+
         if health < 40:
             action = "🔴 禁止加碼"
         elif health < 50:
             action = "🟠 不建議加碼"
         elif current >= reduce_price:
-            action = "🔴 進入減碼區"
+            # 長線模式：到減碼價先列為「獲利觀察」，不要直接變成最需注意
+            action = "🟠 獲利觀察"
         elif 0 <= dist_reduce <= 10:
             action = "🟠 接近減碼區"
         elif current <= add_price and health >= 65:
@@ -1467,30 +1479,60 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
         else:
             action = "🟡 觀察"
 
+        # 第一梯隊排序分數：總分為主，突破/續抱加分；低產業分數或低總分不會因平盤而排前。
+        rank_score = health
+        if is_breakout:
+            rank_score += 4
+        if "續抱" in action:
+            rank_score += 2
+        if "獲利觀察" in action:
+            rank_score += 1
+        if health < 65:
+            rank_score -= 15
+
+        # 最需注意分數：低分/禁止加碼優先；高分創高只列獲利觀察，不當成最大風險。
+        caution_score = 0
+        if health < 50:
+            caution_score += 100
+        elif "禁止" in action or "不建議" in action:
+            caution_score += 80
+        elif current >= reduce_price and health < 70:
+            caution_score += 60
+        elif 0 <= dist_reduce <= 5 and health < 70:
+            caution_score += 40
+        elif current >= reduce_price and health >= 70:
+            caution_score += 15
+        elif 0 <= dist_reduce <= 5 and health >= 70:
+            caution_score += 10
+
         rows.append({
             "股票": stock_name,
             "現價": round(current, 2),
             "AI總分": health,
+            "排序分數": round(rank_score, 1),
+            "注意分數": round(caution_score, 1),
             "加碼價": add_price,
             "減碼價": reduce_price,
             "距加碼%": round(dist_add, 1),
             "距減碼%": round(dist_reduce, 1),
             "動作": action,
+            "風險說明": risk_text,
         })
 
     df = pd.DataFrame(rows)
     if df.empty:
         return {}
 
-    top_score = int(df["AI總分"].max())
-    top_group = df[df["AI總分"] >= top_score - 2].sort_values(["AI總分"], ascending=False)
+    top_score = float(df["排序分數"].max())
+    top_group = df[df["排序分數"] >= top_score - 3].sort_values(["排序分數", "AI總分"], ascending=False)
     top_group_names = "、".join(top_group["股票"].tolist())
 
-    caution_df = df[df["動作"].astype(str).str.contains("減碼", na=False)]
+    caution_df = df[df["注意分數"] > 0].copy()
     if caution_df.empty:
-        caution = df.sort_values(["距減碼%"], ascending=True).iloc[0]
+        # 沒有真正需要注意時，抓最低分
+        caution = df.sort_values(["AI總分"], ascending=True).iloc[0]
     else:
-        caution = caution_df.sort_values(["距減碼%"], ascending=True).iloc[0]
+        caution = caution_df.sort_values(["注意分數", "AI總分"], ascending=[False, True]).iloc[0]
 
     add_df = df[df["AI總分"] >= 50].copy()
     add_df = add_df[add_df["距加碼%"] <= 5]
@@ -1501,7 +1543,7 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
 
     return {
         "df": df,
-        "top_score": top_score,
+        "top_score": int(df["AI總分"].max()),
         "top_group_names": top_group_names,
         "top_group": top_group,
         "caution": caution,
@@ -1841,7 +1883,7 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
             rows.append({"等級": "🟡 接近買點", "股票": stock_name, "訊息": f"距離加碼價約 {add_gap:.2f}%", "建議": "加入觀察，等待拉回"})
 
         if current >= rule["reduce"] or "過熱" in risk_text:
-            rows.append({"等級": "🔴 高檔風險", "股票": stock_name, "訊息": f"現價 {current:.2f}｜{risk_text}", "建議": "停止追高，必要時小幅減碼"})
+            rows.append({"等級": "🔴 高檔風險", "股票": stock_name, "訊息": f"現價 {current:.2f}｜{risk_text}", "建議": "續抱但不追高，若部位過大再小幅調節"})
         elif 0 < reduce_gap <= 3:
             rows.append({"等級": "🟠 接近減碼區", "股票": stock_name, "訊息": f"距離減碼價約 {reduce_gap:.2f}%", "建議": "續抱但不追價"})
 
@@ -2119,7 +2161,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.5b Price Function Fix Edition
+# 分頁細節：V10.6 Trend Friendly Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2536,7 +2578,7 @@ with tab_ai:
         df_decision["法人分數"] = df_decision["法人共振"].apply(resonance_rank)
         df_decision["燈號分數"] = df_decision["AI燈號"].apply(signal_rank)
 
-        # 今日最值得關注：總分高、法人轉強、但不是減碼/停買
+        # 今日最值得關注：總分高、法人轉強、但不是獲利觀察
         focus_df = df_decision[~df_decision["AI燈號"].astype(str).str.contains("減碼|停買|保守", na=False)].copy()
         if focus_df.empty:
             focus_df = df_decision.copy()
@@ -2546,11 +2588,11 @@ with tab_ai:
             ascending=[False, False, False]
         ).iloc[0]
 
-        # 最接近減碼：AI燈號已經出現減碼/停買
+        # 最接近減碼：AI燈號已經出現獲利觀察
         reduce_df = df_decision[df_decision["AI燈號"].astype(str).str.contains("減碼|停買", na=False)]
         reduce_item = reduce_df.sort_values(["總分"], ascending=False).iloc[0] if not reduce_df.empty else None
 
-        # 最穩健：續抱且總分高，不含減碼/停買
+        # 最穩健：續抱且總分高，不含獲利觀察
         stable_df = df_decision[
             df_decision["AI燈號"].astype(str).str.contains("續抱", na=False)
             & ~df_decision["AI燈號"].astype(str).str.contains("減碼|停買", na=False)
@@ -2595,7 +2637,7 @@ with tab_ai:
 
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V10.5b Price Function Fix Edition")
+    st.subheader("📈 個股K線分析 V10.6 Trend Friendly Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -2760,4 +2802,4 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 10.5b Price Function Fix Edition')
+st.caption('Version 10.6 Trend Friendly Edition')
