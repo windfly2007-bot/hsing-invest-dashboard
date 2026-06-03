@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.8 Signal Consistency Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.8b Tab Order Fix Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -1349,10 +1349,10 @@ def operation_signal(stock_name, current_price, health_score, chip_score, risk_t
 
     # V10.8：過熱不等於減碼。
     # 高分 + 籌碼不差時，過熱只提醒「續抱、不追高」。
-    if "極強趨勢" in str(risk_text) or "過熱" in str(risk_text):
-        if health_score >= 75 and chip_score >= 0:
+    if "極強趨勢" in str(risk_text) or "過熱" in str(risk_text) or "強勢偏熱" in str(risk_text):
+        if health_score >= 60 and chip_score >= -1:
             return "🚀 強勢續抱", "強勢過熱，不追高；只有跌破支撐或法人轉賣才減碼"
-        if health_score >= 60:
+        if health_score >= 50:
             return "🟠 續抱不追高", "短線偏熱，先觀察支撐，不急著減碼"
         return "🔴 過熱轉弱", "過熱但健康度不足，若跌破支撐可減碼"
 
@@ -1629,8 +1629,9 @@ def v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_scor
             continue
 
         current = float(get_display_price(ticker, df))
-        plan = smart_trade_plan(stock_name, current, portfolio, is_strong_trend_hold(stock_name, df, current, health, chip_score_map.get(stock_name, 0)))
         health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+        strong_hold = is_strong_trend_hold(stock_name, df, current, health, chip_score_map.get(stock_name, 0))
+        plan = smart_trade_plan(stock_name, current, portfolio, strong_hold)
         signal, reason = operation_signal(
             stock_name,
             current,
@@ -1673,7 +1674,7 @@ def v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_scor
             ),
             "減碼區": plan["減碼區"],
             "距減碼": f"{dist_reduce:+.1f}%",
-            "建議減碼": plan["建議股數"] if "減碼" in plan["建議股數"] else "暫不減碼",
+            "建議減碼": "暫不減碼，強勢續抱" if strong_hold else (plan["建議股數"] if "減碼" in plan["建議股數"] else "暫不減碼"),
             "位置狀態": plan["位置狀態"],
             "理由": reason,
         })
@@ -1705,7 +1706,7 @@ def news_ai_brief(hot_rows):
 
 
 def is_strong_trend_hold(stock_name, df, current_price, health_score, chip_score=0):
-    """V10.8 強勢股保護：高分、均線多頭、創高或接近新高時，不直接給減碼股數。"""
+    """V10.8a 強勢股保護：以趨勢分數為主，避免廣達這類主升段因高檔被誤判減碼。"""
     if df is None or df.empty or len(df) < 60:
         return False
 
@@ -1715,9 +1716,24 @@ def is_strong_trend_hold(stock_name, df, current_price, health_score, chip_score
         ma10 = float(df["Close"].rolling(10).mean().iloc[-1])
         ma20 = float(df["Close"].rolling(20).mean().iloc[-1])
         high60 = float(df["Close"].tail(60).max())
+
         near_high = close >= high60 * 0.98
-        ma_bull = close > ma5 > ma10 > ma20
-        return health_score >= 75 and ma_bull and near_high and chip_score >= -1
+        above_ma = close > ma5 and close > ma10 and close > ma20
+        ma_bull = ma5 > ma10 > ma20
+
+        trend_score, _ = get_trend_score_details(df, chip_score)
+
+        # 關鍵修正：
+        # 1. 總分可能因高檔扣分降到60多，但只要趨勢分數高，仍視為強勢續抱。
+        # 2. 只有「高檔 + 趨勢轉弱」才允許出現減碼股數。
+        if trend_score >= 70 and near_high and above_ma:
+            return True
+        if trend_score >= 60 and ma_bull and above_ma and chip_score >= -1:
+            return True
+        if health_score >= 75 and ma_bull and near_high and chip_score >= -1:
+            return True
+
+        return False
     except Exception:
         return False
 
@@ -2393,7 +2409,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.8 Signal Consistency Edition
+# 分頁細節：V10.8b Tab Order Fix Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2478,8 +2494,6 @@ with tab_overview:
 
     st.caption("持股明細請到「💰 持股中心」；健康度、買點與診斷細節請到「🧠 AI診斷中心」。")
 
-
-
 with tab_scenario:
     st.subheader("🔮 明日持股走勢可能劇本分析")
     st.caption("現價優先抓取最新/最後成交價；依技術面、籌碼面、產業溫度、支撐壓力與加碼/減碼區推估，作為長線投資輔助參考。")
@@ -2501,380 +2515,8 @@ with tab_scenario:
     else:
         st.info("目前資料不足，無法產生明日劇本。")
 
-
-with tab_portfolio:
-    st.caption(data_update_status())
-    st.subheader("💰 持股追蹤")
-
-    portfolio_rows = []
-    total_cost = 0
-    total_value = 0
-    total_profit = 0
-
-    for stock_name, info in portfolio.items():
-        df_p = get_data(stock_list[stock_name], "5d")
-        if df_p.empty or len(df_p) < 2:
-            continue
-
-        current = float(get_display_price(stock_list[stock_name], df_p))
-        buy_amount, sell_amount, net_profit, net_profit_pct = calc_net_profit(
-            info["shares"], info["cost"], current, fee_discount
-        )
-
-        total_cost += buy_amount
-        total_value += sell_amount
-        total_profit += net_profit
-
-        portfolio_rows.append({
-            "股票": stock_name,
-            "股數": info["shares"],
-            "成本": info["cost"],
-            "現價": round(current, 2),
-            "已扣費損益": colored_text(round(net_profit)),
-            "報酬率": colored_text(round(net_profit_pct, 2), "%"),
-        })
-
-    total_profit_pct = total_profit / total_cost * 100 if total_cost else 0
-
-    p1, p2, p3, p4 = st.columns(4)
-    p1.metric("投入成本", f"{total_cost:,.0f}")
-    p2.metric("目前市值", f"{total_value:,.0f}")
-    p3.markdown(f'<div>已扣費總損益</div><div class="big-profit {tw_color(total_profit)}-text">{total_profit:,.0f}</div>', unsafe_allow_html=True)
-    p4.markdown(f'<div>已扣費報酬率</div><div class="big-profit {tw_color(total_profit_pct)}-text">{total_profit_pct:.2f}%</div>', unsafe_allow_html=True)
-
-    portfolio_df = pd.DataFrame(portfolio_rows)
-    if not portfolio_df.empty:
-        st.markdown(portfolio_df.to_html(escape=False, index=False), unsafe_allow_html=True)
-
-    st.subheader("🏆 持股績效排名")
-    if not perf_df.empty:
-        st.dataframe(perf_df, use_container_width=True, hide_index=True)
-
-    st.subheader("🚨 成本價警示")
-    if not warn_df.empty:
-        st.dataframe(warn_df, use_container_width=True, hide_index=True)
-
-    st.subheader("📦 資產配置雷達")
-    if not alloc_summary.empty:
-        st.dataframe(alloc_summary, use_container_width=True, hide_index=True)
-    st.info(alloc_note)
-
-    st.subheader("💵 股息收入估算")
-    if not div_df.empty:
-        st.dataframe(div_df, use_container_width=True, hide_index=True)
-        st.metric("預估全年股息收入", f"{total_div:,.0f} 元")
-
-    st.subheader("🎯 AI買賣計畫中心")
-    trade_plan_df = v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_score_map)
-    if not trade_plan_df.empty:
-        st.dataframe(trade_plan_df, use_container_width=True, hide_index=True)
-
-    st.subheader("🧭 投資組合風險儀表板")
-    risk_df, ai_pct, steel_pct, risk_label, risk_note = portfolio_risk_dashboard(portfolio)
-    rc1, rc2, rc3 = st.columns(3)
-    rc1.metric("AI族群占比", f"{ai_pct:.1f}%")
-    rc2.metric("鋼鐵族群占比", f"{steel_pct:.1f}%")
-    rc3.metric("集中風險", risk_label)
-    if not risk_df.empty:
-        st.dataframe(risk_df, use_container_width=True, hide_index=True)
-    st.info(risk_note)
-
-    st.subheader("💵 新資金配置建議")
-    allocation_df = allocation_suggestion(cash_input, ai_score, steel_score)
-    st.dataframe(allocation_df, use_container_width=True, hide_index=True)
-
-with tab_ai_market:
-    st.subheader("🤖 AI / 半導體市場")
-    cols = st.columns(len(ai_market_list))
-    for i, (name, ticker) in enumerate(ai_market_list.items()):
-        latest, pct = get_latest_pct(ticker)
-        cols[i].markdown(market_card(name, "N/A" if latest is None else f"{latest:.2f}", pct), unsafe_allow_html=True)
-
-    st.metric("AI市場溫度", f"{ai_score} 分")
-    st.info(ai_temperature_comment(ai_score))
-
-    leader_score, leader_msg = leader_index_score()
-    st.metric("AI領先指數", f"{leader_score} 分")
-    st.info(leader_msg)
-
-    render_ai_score_explanation()
-
-    st.subheader("🌙 台積電 ADR / 美股隔日提示")
-    adr_info = adr_prediction_text()
-    st.markdown(f"""
-    <div class="alert-card">
-    <b>{adr_info['判斷']}</b><br>
-    依據：{adr_info['依據']}<br>
-    建議：{adr_info['建議']}
-    </div>
-    """, unsafe_allow_html=True)
-
-
-with tab_steel:
-    st.subheader("🏗️ 鋼鐵 / 原物料")
-    cols = st.columns(len(commodity_list))
-    for i, (name, ticker) in enumerate(commodity_list.items()):
-        latest, pct = get_latest_pct(ticker)
-        cols[i].markdown(market_card(name, "N/A" if latest is None else f"{latest:.2f}", pct), unsafe_allow_html=True)
-
-    st.metric("鋼鐵市場溫度", f"{steel_score} 分")
-    st.info(steel_temperature_comment(steel_score))
-
-    steel_leader_score, steel_leader_msg = steel_leader_index_score()
-    st.metric("鋼鐵領先指數", f"{steel_leader_score} 分")
-    st.info(steel_leader_msg)
-
-    steel_score_now, steel_light = steel_stock_score()
-    st.subheader("🏭 鋼鐵景氣燈號")
-    st.metric("鋼鐵景氣分數", f"{steel_score_now} 分", steel_light)
-
-
-with tab_institution:
-    st.subheader("🏦 法人籌碼 5日 / 20日")
-    chip_df = pd.DataFrame(chip_rows)
-    st.dataframe(chip_df, use_container_width=True, hide_index=True)
-
-    st.subheader("📈 法人連買天數")
-    consecutive_rows = []
-    for stock_name in stock_list:
-        foreign_days = calc_consecutive_buy_days(
-            stock_name,
-            ["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"]
-        )
-        trust_days = calc_consecutive_buy_days(
-            stock_name,
-            ["投信", "Investment", "Investment_Trust"]
-        )
-        if foreign_days >= 5 or trust_days >= 5:
-            signal = "🟢 籌碼偏多"
-        elif foreign_days >= 2 or trust_days >= 2:
-            signal = "🔵 籌碼轉強觀察"
-        else:
-            signal = "🟡 尚未連續買超"
-
-        consecutive_rows.append({
-            "股票": stock_name,
-            "外資連買": f"{foreign_days} 天",
-            "投信連買": f"{trust_days} 天",
-            "籌碼燈號": signal,
-        })
-
-    st.dataframe(pd.DataFrame(consecutive_rows), use_container_width=True, hide_index=True)
-
-    st.subheader("🏆 法人強度排行榜")
-    rank_df = institutional_strength_rank()
-    st.dataframe(rank_df, use_container_width=True, hide_index=True)
-
-
-with tab_news:
-    st.subheader("📰 新聞中心")
-
-    hot_rows = []
-    for name, target in news_targets.items():
-        keyword = target.get("keyword", name)
-        ticker = target.get("ticker", "")
-
-        news_rows = []
-        if ticker:
-            news_rows.extend(get_yahoo_news(ticker, limit=3))
-        news_rows.extend(get_google_news(keyword, limit=3))
-
-        # 去除重複標題
-        unique_rows = []
-        seen_titles = set()
-        for item in news_rows:
-            title = item.get("標題", "")
-            if not title or title in seen_titles:
-                continue
-            seen_titles.add(title)
-            item["情緒"] = news_sentiment(title)
-            unique_rows.append(item)
-            if len(unique_rows) >= 5:
-                break
-
-        st.markdown(f"### {name}")
-        if unique_rows:
-            show_df = pd.DataFrame(unique_rows)
-            # 連結太長，表格先顯示標題/來源/情緒，連結另外用可點擊形式列出
-            st.dataframe(
-                show_df[["情緒", "標題", "來源"]],
-                use_container_width=True,
-                hide_index=True
-            )
-            for item in unique_rows[:3]:
-                link = item.get("連結", "")
-                title = item.get("標題", "")
-                if link:
-                    st.markdown(f"- [{title}]({link})")
-                else:
-                    st.markdown(f"- {title}")
-            hot_rows.extend(unique_rows[:2])
-        else:
-            st.info("目前暫時抓不到新聞，可能是資料源暫時無回應。")
-
-    st.subheader("🔥 今日熱門新聞")
-    if hot_rows:
-        st.subheader("🤖 新聞AI解讀")
-        st.info(news_ai_brief(hot_rows))
-
-        hot_df = pd.DataFrame(hot_rows[:8])
-        st.dataframe(
-            hot_df[["情緒", "標題", "來源"]],
-            use_container_width=True,
-            hide_index=True
-        )
-
-
-with tab_ai:
-    st.subheader("🤖 AI診斷中心")
-
-    diagnosis_rows = []
-    for stock_name, ticker in stock_list.items():
-        df_d = get_data(ticker, "1y")
-        if df_d.empty or len(df_d) < 120:
-            continue
-
-        current = float(df_d.iloc[-1]["Close"])
-        tech_signal, tech_score = technical_signal(stock_name, ticker)
-        chip_score = chip_score_map.get(stock_name, 0)
-        chip_part = max(0, min(30, 15 + chip_score * 3))
-
-        if long_term_rules[stock_name]["type"] == "AI":
-            industry_score = ai_score
-        else:
-            industry_score = steel_score
-        industry_part = int(max(0, min(30, industry_score * 0.3)))
-
-        tech_part = int(max(0, min(40, tech_score * 0.4)))
-        total_score = int(max(0, min(100, tech_part + chip_part + industry_part)))
-
-        distance, risk_text = risk_distance_from_ma(df_d)
-        trend_score, trend_detail = get_trend_score_details(df_d, chip_score)
-        signal, reason = operation_signal(
-            stock_name,
-            current,
-            total_score,
-            chip_score,
-            risk_text,
-        )
-
-        foreign_days = calc_consecutive_buy_days(
-            stock_name,
-            ["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"]
-        )
-        trust_days = calc_consecutive_buy_days(
-            stock_name,
-            ["投信", "Investment", "Investment_Trust"]
-        )
-
-        if foreign_days >= 3 and trust_days >= 3:
-            resonance = "🟢 法人共振"
-        elif foreign_days >= 3 or trust_days >= 3:
-            resonance = "🔵 單一法人轉強"
-        else:
-            resonance = "🟡 尚未共振"
-
-        diagnosis_rows.append({
-            "股票": stock_name,
-            "現價": round(current, 2),
-            "技術面": f"{tech_part}/40",
-            "籌碼面": f"{chip_part}/30",
-            "產業面": f"{industry_part}/30",
-            "趨勢分數": trend_score,
-            "趨勢狀態": trend_detail.get("狀態", ""),
-            "總分": total_score,
-            "AI燈號": signal,
-            "法人共振": resonance,
-            "原因": reason,
-        })
-
-    diagnosis_df = pd.DataFrame(diagnosis_rows)
-    if not diagnosis_df.empty:
-        st.dataframe(diagnosis_df, use_container_width=True, hide_index=True)
-
-        # V9.4a：AI診斷結論改為決策型，不再單純用總分第一名當「今日較強」
-        df_decision = diagnosis_df.copy()
-
-        def resonance_rank(text):
-            if "法人共振" in str(text):
-                return 2
-            if "單一法人轉強" in str(text):
-                return 1
-            return 0
-
-        def signal_rank(text):
-            text = str(text)
-            if "加碼" in text:
-                return 3
-            if "續抱" in text:
-                return 2
-            if "觀察" in text:
-                return 1
-            return 0
-
-        df_decision["法人分數"] = df_decision["法人共振"].apply(resonance_rank)
-        df_decision["燈號分數"] = df_decision["AI燈號"].apply(signal_rank)
-
-        # 今日最值得關注：總分高、法人轉強、但不是獲利觀察
-        focus_df = df_decision[~df_decision["AI燈號"].astype(str).str.contains("減碼|停買|保守", na=False)].copy()
-        if focus_df.empty:
-            focus_df = df_decision.copy()
-
-        focus = focus_df.sort_values(
-            ["總分", "法人分數", "燈號分數"],
-            ascending=[False, False, False]
-        ).iloc[0]
-
-        # 最接近減碼：AI燈號已經出現獲利觀察
-        reduce_df = df_decision[df_decision["AI燈號"].astype(str).str.contains("減碼|停買", na=False)]
-        reduce_item = reduce_df.sort_values(["總分"], ascending=False).iloc[0] if not reduce_df.empty else None
-
-        # 最穩健：續抱且總分高，不含獲利觀察
-        stable_df = df_decision[
-            df_decision["AI燈號"].astype(str).str.contains("續抱", na=False)
-            & ~df_decision["AI燈號"].astype(str).str.contains("減碼|停買", na=False)
-        ]
-        stable = stable_df.sort_values(["總分", "法人分數"], ascending=[False, False]).iloc[0] if not stable_df.empty else focus
-
-        weak = df_decision.sort_values("總分", ascending=True).iloc[0]
-
-        decision = v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map)
-
-        if decision:
-            top_group_names = decision["top_group_names"]
-            top_score = decision["top_score"]
-            caution = decision["caution"]
-            best_add = decision["best_add"]
-            forbidden = decision["forbidden"]
-
-            c1, c2 = st.columns(2)
-            c1.success(
-                f"🏆 第一梯隊：{top_group_names}｜{top_score}分"
-            )
-            c2.warning(
-                f"⚠️ 最需注意：{caution['股票']}｜現價 {caution['現價']}｜距減碼 {caution['距減碼%']}%｜{caution['動作']}"
-            )
-
-            c3, c4 = st.columns(2)
-            if best_add is not None:
-                c3.success(
-                    f"🟢 最佳加碼機會：{best_add['股票']}｜現價 {best_add['現價']}｜加碼價 {best_add['加碼價']}｜距加碼 {best_add['距加碼%']}%"
-                )
-            else:
-                c3.info("🟢 最佳加碼機會：目前沒有明顯加碼標的")
-
-            if forbidden is not None:
-                c4.error(
-                    f"🔴 禁止加碼：{forbidden['股票']}｜{forbidden['AI總分']}分｜分數低於50"
-                )
-            else:
-                c4.success("🔴 禁止加碼：目前沒有分數低於50的標的")
-    else:
-        st.info("目前資料不足，無法產生AI診斷。")
-
-
 with tab_chart:
-    st.subheader("📈 個股K線分析 V10.8 Signal Consistency Edition")
+    st.subheader("📈 個股K線分析 V10.8b Tab Order Fix Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -3082,4 +2724,371 @@ with tab_chart:
                 若是「強勢股創高 + 均線多頭 + 法人仍偏多」，系統會顯示 **強勢續抱 / 不追高**。
                 """)
 
-st.caption('Version 10.8 Signal Consistency Edition')
+st.caption('Version 10.8b Tab Order Fix Edition')
+
+with tab_ai_market:
+    st.subheader("🤖 AI / 半導體市場")
+    cols = st.columns(len(ai_market_list))
+    for i, (name, ticker) in enumerate(ai_market_list.items()):
+        latest, pct = get_latest_pct(ticker)
+        cols[i].markdown(market_card(name, "N/A" if latest is None else f"{latest:.2f}", pct), unsafe_allow_html=True)
+
+    st.metric("AI市場溫度", f"{ai_score} 分")
+    st.info(ai_temperature_comment(ai_score))
+
+    leader_score, leader_msg = leader_index_score()
+    st.metric("AI領先指數", f"{leader_score} 分")
+    st.info(leader_msg)
+
+    render_ai_score_explanation()
+
+    st.subheader("🌙 台積電 ADR / 美股隔日提示")
+    adr_info = adr_prediction_text()
+    st.markdown(f"""
+    <div class="alert-card">
+    <b>{adr_info['判斷']}</b><br>
+    依據：{adr_info['依據']}<br>
+    建議：{adr_info['建議']}
+    </div>
+    """, unsafe_allow_html=True)
+
+with tab_steel:
+    st.subheader("🏗️ 鋼鐵 / 原物料")
+    cols = st.columns(len(commodity_list))
+    for i, (name, ticker) in enumerate(commodity_list.items()):
+        latest, pct = get_latest_pct(ticker)
+        cols[i].markdown(market_card(name, "N/A" if latest is None else f"{latest:.2f}", pct), unsafe_allow_html=True)
+
+    st.metric("鋼鐵市場溫度", f"{steel_score} 分")
+    st.info(steel_temperature_comment(steel_score))
+
+    steel_leader_score, steel_leader_msg = steel_leader_index_score()
+    st.metric("鋼鐵領先指數", f"{steel_leader_score} 分")
+    st.info(steel_leader_msg)
+
+    steel_score_now, steel_light = steel_stock_score()
+    st.subheader("🏭 鋼鐵景氣燈號")
+    st.metric("鋼鐵景氣分數", f"{steel_score_now} 分", steel_light)
+
+with tab_institution:
+    st.subheader("🏦 法人籌碼 5日 / 20日")
+    chip_df = pd.DataFrame(chip_rows)
+    st.dataframe(chip_df, use_container_width=True, hide_index=True)
+
+    st.subheader("📈 法人連買天數")
+    consecutive_rows = []
+    for stock_name in stock_list:
+        foreign_days = calc_consecutive_buy_days(
+            stock_name,
+            ["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"]
+        )
+        trust_days = calc_consecutive_buy_days(
+            stock_name,
+            ["投信", "Investment", "Investment_Trust"]
+        )
+        if foreign_days >= 5 or trust_days >= 5:
+            signal = "🟢 籌碼偏多"
+        elif foreign_days >= 2 or trust_days >= 2:
+            signal = "🔵 籌碼轉強觀察"
+        else:
+            signal = "🟡 尚未連續買超"
+
+        consecutive_rows.append({
+            "股票": stock_name,
+            "外資連買": f"{foreign_days} 天",
+            "投信連買": f"{trust_days} 天",
+            "籌碼燈號": signal,
+        })
+
+    st.dataframe(pd.DataFrame(consecutive_rows), use_container_width=True, hide_index=True)
+
+    st.subheader("🏆 法人強度排行榜")
+    rank_df = institutional_strength_rank()
+    st.dataframe(rank_df, use_container_width=True, hide_index=True)
+
+with tab_news:
+    st.subheader("📰 新聞中心")
+
+    hot_rows = []
+    for name, target in news_targets.items():
+        keyword = target.get("keyword", name)
+        ticker = target.get("ticker", "")
+
+        news_rows = []
+        if ticker:
+            news_rows.extend(get_yahoo_news(ticker, limit=3))
+        news_rows.extend(get_google_news(keyword, limit=3))
+
+        # 去除重複標題
+        unique_rows = []
+        seen_titles = set()
+        for item in news_rows:
+            title = item.get("標題", "")
+            if not title or title in seen_titles:
+                continue
+            seen_titles.add(title)
+            item["情緒"] = news_sentiment(title)
+            unique_rows.append(item)
+            if len(unique_rows) >= 5:
+                break
+
+        st.markdown(f"### {name}")
+        if unique_rows:
+            show_df = pd.DataFrame(unique_rows)
+            # 連結太長，表格先顯示標題/來源/情緒，連結另外用可點擊形式列出
+            st.dataframe(
+                show_df[["情緒", "標題", "來源"]],
+                use_container_width=True,
+                hide_index=True
+            )
+            for item in unique_rows[:3]:
+                link = item.get("連結", "")
+                title = item.get("標題", "")
+                if link:
+                    st.markdown(f"- [{title}]({link})")
+                else:
+                    st.markdown(f"- {title}")
+            hot_rows.extend(unique_rows[:2])
+        else:
+            st.info("目前暫時抓不到新聞，可能是資料源暫時無回應。")
+
+    st.subheader("🔥 今日熱門新聞")
+    if hot_rows:
+        st.subheader("🤖 新聞AI解讀")
+        st.info(news_ai_brief(hot_rows))
+
+        hot_df = pd.DataFrame(hot_rows[:8])
+        st.dataframe(
+            hot_df[["情緒", "標題", "來源"]],
+            use_container_width=True,
+            hide_index=True
+        )
+
+with tab_ai:
+    st.subheader("🤖 AI診斷中心")
+
+    diagnosis_rows = []
+    for stock_name, ticker in stock_list.items():
+        df_d = get_data(ticker, "1y")
+        if df_d.empty or len(df_d) < 120:
+            continue
+
+        current = float(df_d.iloc[-1]["Close"])
+        tech_signal, tech_score = technical_signal(stock_name, ticker)
+        chip_score = chip_score_map.get(stock_name, 0)
+        chip_part = max(0, min(30, 15 + chip_score * 3))
+
+        if long_term_rules[stock_name]["type"] == "AI":
+            industry_score = ai_score
+        else:
+            industry_score = steel_score
+        industry_part = int(max(0, min(30, industry_score * 0.3)))
+
+        tech_part = int(max(0, min(40, tech_score * 0.4)))
+        total_score = int(max(0, min(100, tech_part + chip_part + industry_part)))
+
+        distance, risk_text = risk_distance_from_ma(df_d)
+        trend_score, trend_detail = get_trend_score_details(df_d, chip_score)
+        signal, reason = operation_signal(
+            stock_name,
+            current,
+            total_score,
+            chip_score,
+            risk_text,
+        )
+
+        foreign_days = calc_consecutive_buy_days(
+            stock_name,
+            ["外資", "Foreign", "Foreign_Investor", "Foreign_Dealer"]
+        )
+        trust_days = calc_consecutive_buy_days(
+            stock_name,
+            ["投信", "Investment", "Investment_Trust"]
+        )
+
+        if foreign_days >= 3 and trust_days >= 3:
+            resonance = "🟢 法人共振"
+        elif foreign_days >= 3 or trust_days >= 3:
+            resonance = "🔵 單一法人轉強"
+        else:
+            resonance = "🟡 尚未共振"
+
+        diagnosis_rows.append({
+            "股票": stock_name,
+            "現價": round(current, 2),
+            "技術面": f"{tech_part}/40",
+            "籌碼面": f"{chip_part}/30",
+            "產業面": f"{industry_part}/30",
+            "趨勢分數": trend_score,
+            "趨勢狀態": trend_detail.get("狀態", ""),
+            "總分": total_score,
+            "AI燈號": signal,
+            "法人共振": resonance,
+            "原因": reason,
+        })
+
+    diagnosis_df = pd.DataFrame(diagnosis_rows)
+    if not diagnosis_df.empty:
+        st.dataframe(diagnosis_df, use_container_width=True, hide_index=True)
+
+        # V9.4a：AI診斷結論改為決策型，不再單純用總分第一名當「今日較強」
+        df_decision = diagnosis_df.copy()
+
+        def resonance_rank(text):
+            if "法人共振" in str(text):
+                return 2
+            if "單一法人轉強" in str(text):
+                return 1
+            return 0
+
+        def signal_rank(text):
+            text = str(text)
+            if "加碼" in text:
+                return 3
+            if "續抱" in text:
+                return 2
+            if "觀察" in text:
+                return 1
+            return 0
+
+        df_decision["法人分數"] = df_decision["法人共振"].apply(resonance_rank)
+        df_decision["燈號分數"] = df_decision["AI燈號"].apply(signal_rank)
+
+        # 今日最值得關注：總分高、法人轉強、但不是獲利觀察
+        focus_df = df_decision[~df_decision["AI燈號"].astype(str).str.contains("減碼|停買|保守", na=False)].copy()
+        if focus_df.empty:
+            focus_df = df_decision.copy()
+
+        focus = focus_df.sort_values(
+            ["總分", "法人分數", "燈號分數"],
+            ascending=[False, False, False]
+        ).iloc[0]
+
+        # 最接近減碼：AI燈號已經出現獲利觀察
+        reduce_df = df_decision[df_decision["AI燈號"].astype(str).str.contains("減碼|停買", na=False)]
+        reduce_item = reduce_df.sort_values(["總分"], ascending=False).iloc[0] if not reduce_df.empty else None
+
+        # 最穩健：續抱且總分高，不含獲利觀察
+        stable_df = df_decision[
+            df_decision["AI燈號"].astype(str).str.contains("續抱", na=False)
+            & ~df_decision["AI燈號"].astype(str).str.contains("減碼|停買", na=False)
+        ]
+        stable = stable_df.sort_values(["總分", "法人分數"], ascending=[False, False]).iloc[0] if not stable_df.empty else focus
+
+        weak = df_decision.sort_values("總分", ascending=True).iloc[0]
+
+        decision = v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map)
+
+        if decision:
+            top_group_names = decision["top_group_names"]
+            top_score = decision["top_score"]
+            caution = decision["caution"]
+            best_add = decision["best_add"]
+            forbidden = decision["forbidden"]
+
+            c1, c2 = st.columns(2)
+            c1.success(
+                f"🏆 第一梯隊：{top_group_names}｜{top_score}分"
+            )
+            c2.warning(
+                f"⚠️ 最需注意：{caution['股票']}｜現價 {caution['現價']}｜距減碼 {caution['距減碼%']}%｜{caution['動作']}"
+            )
+
+            c3, c4 = st.columns(2)
+            if best_add is not None:
+                c3.success(
+                    f"🟢 最佳加碼機會：{best_add['股票']}｜現價 {best_add['現價']}｜加碼價 {best_add['加碼價']}｜距加碼 {best_add['距加碼%']}%"
+                )
+            else:
+                c3.info("🟢 最佳加碼機會：目前沒有明顯加碼標的")
+
+            if forbidden is not None:
+                c4.error(
+                    f"🔴 禁止加碼：{forbidden['股票']}｜{forbidden['AI總分']}分｜分數低於50"
+                )
+            else:
+                c4.success("🔴 禁止加碼：目前沒有分數低於50的標的")
+    else:
+        st.info("目前資料不足，無法產生AI診斷。")
+
+with tab_portfolio:
+    st.caption(data_update_status())
+    st.subheader("💰 持股追蹤")
+
+    portfolio_rows = []
+    total_cost = 0
+    total_value = 0
+    total_profit = 0
+
+    for stock_name, info in portfolio.items():
+        df_p = get_data(stock_list[stock_name], "5d")
+        if df_p.empty or len(df_p) < 2:
+            continue
+
+        current = float(get_display_price(stock_list[stock_name], df_p))
+        buy_amount, sell_amount, net_profit, net_profit_pct = calc_net_profit(
+            info["shares"], info["cost"], current, fee_discount
+        )
+
+        total_cost += buy_amount
+        total_value += sell_amount
+        total_profit += net_profit
+
+        portfolio_rows.append({
+            "股票": stock_name,
+            "股數": info["shares"],
+            "成本": info["cost"],
+            "現價": round(current, 2),
+            "已扣費損益": colored_text(round(net_profit)),
+            "報酬率": colored_text(round(net_profit_pct, 2), "%"),
+        })
+
+    total_profit_pct = total_profit / total_cost * 100 if total_cost else 0
+
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("投入成本", f"{total_cost:,.0f}")
+    p2.metric("目前市值", f"{total_value:,.0f}")
+    p3.markdown(f'<div>已扣費總損益</div><div class="big-profit {tw_color(total_profit)}-text">{total_profit:,.0f}</div>', unsafe_allow_html=True)
+    p4.markdown(f'<div>已扣費報酬率</div><div class="big-profit {tw_color(total_profit_pct)}-text">{total_profit_pct:.2f}%</div>', unsafe_allow_html=True)
+
+    portfolio_df = pd.DataFrame(portfolio_rows)
+    if not portfolio_df.empty:
+        st.markdown(portfolio_df.to_html(escape=False, index=False), unsafe_allow_html=True)
+
+    st.subheader("🏆 持股績效排名")
+    if not perf_df.empty:
+        st.dataframe(perf_df, use_container_width=True, hide_index=True)
+
+    st.subheader("🚨 成本價警示")
+    if not warn_df.empty:
+        st.dataframe(warn_df, use_container_width=True, hide_index=True)
+
+    st.subheader("📦 資產配置雷達")
+    if not alloc_summary.empty:
+        st.dataframe(alloc_summary, use_container_width=True, hide_index=True)
+    st.info(alloc_note)
+
+    st.subheader("💵 股息收入估算")
+    if not div_df.empty:
+        st.dataframe(div_df, use_container_width=True, hide_index=True)
+        st.metric("預估全年股息收入", f"{total_div:,.0f} 元")
+
+    st.subheader("🎯 AI買賣計畫中心")
+    trade_plan_df = v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_score_map)
+    if not trade_plan_df.empty:
+        st.dataframe(trade_plan_df, use_container_width=True, hide_index=True)
+
+    st.subheader("🧭 投資組合風險儀表板")
+    risk_df, ai_pct, steel_pct, risk_label, risk_note = portfolio_risk_dashboard(portfolio)
+    rc1, rc2, rc3 = st.columns(3)
+    rc1.metric("AI族群占比", f"{ai_pct:.1f}%")
+    rc2.metric("鋼鐵族群占比", f"{steel_pct:.1f}%")
+    rc3.metric("集中風險", risk_label)
+    if not risk_df.empty:
+        st.dataframe(risk_df, use_container_width=True, hide_index=True)
+    st.info(risk_note)
+
+    st.subheader("💵 新資金配置建議")
+    allocation_df = allocation_suggestion(cash_input, ai_score, steel_score)
+    st.dataframe(allocation_df, use_container_width=True, hide_index=True)
+
