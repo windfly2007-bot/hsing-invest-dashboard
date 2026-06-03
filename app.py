@@ -1,5 +1,6 @@
 # V8.1 Upgrade
 import os
+import html
 import requests
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
@@ -11,7 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V11.0 Wrapped Layout Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V11.0a Layout Hotfix Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -152,7 +153,7 @@ hr {
 }
 
 
-/* V11.0 Wrapped Layout Edition */
+/* V11.0a Layout Hotfix Edition */
 .wrapped-table-card {
     background: #ffffff;
     border: 1px solid #e5e7eb;
@@ -222,46 +223,49 @@ def render_wrapped_table(df, column_widths=None, max_rows=None):
         st.info("目前沒有資料。")
         return
 
-    show_df = df.copy()
-    if max_rows is not None:
-        show_df = show_df.head(max_rows)
+    try:
+        show_df = df.copy()
+        if max_rows is not None:
+            show_df = show_df.head(max_rows)
 
-    column_widths = column_widths or {}
+        column_widths = column_widths or {}
 
-    colgroup = ""
-    if column_widths:
-        colgroup = "<colgroup>"
-        for col in show_df.columns:
-            width = column_widths.get(col, None)
-            if width:
-                colgroup += f'<col style="width:{width};">'
-            else:
-                colgroup += "<col>"
-        colgroup += "</colgroup>"
+        colgroup = ""
+        if column_widths:
+            colgroup = "<colgroup>"
+            for col in show_df.columns:
+                width = column_widths.get(col, None)
+                if width:
+                    colgroup += f'<col style="width:{width};">'
+                else:
+                    colgroup += "<col>"
+            colgroup += "</colgroup>"
 
-    header = "".join(f"<th>{html.escape(str(col))}</th>" for col in show_df.columns)
-    body_rows = []
+        header = "".join(f"<th>{html.escape(str(col))}</th>" for col in show_df.columns)
+        body_rows = []
 
-    for _, row in show_df.iterrows():
-        cells = []
-        for col in show_df.columns:
-            value = row[col]
-            if pd.isna(value):
-                value = ""
-            text_value = html.escape(str(value))
-            cells.append(f"<td>{text_value}</td>")
-        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+        for _, row in show_df.iterrows():
+            cells = []
+            for col in show_df.columns:
+                value = row[col]
+                if pd.isna(value):
+                    value = ""
+                text_value = html.escape(str(value))
+                cells.append(f"<td>{text_value}</td>")
+            body_rows.append("<tr>" + "".join(cells) + "</tr>")
 
-    table_html = f"""
-    <div class="wrapped-table-card">
-        <table class="wrapped-table">
-            {colgroup}
-            <thead><tr>{header}</tr></thead>
-            <tbody>{''.join(body_rows)}</tbody>
-        </table>
-    </div>
-    """
-    st.markdown(table_html, unsafe_allow_html=True)
+        table_html = f"""
+        <div class="wrapped-table-card">
+            <table class="wrapped-table">
+                {colgroup}
+                <thead><tr>{header}</tr></thead>
+                <tbody>{''.join(body_rows)}</tbody>
+            </table>
+        </div>
+        """
+        st.markdown(table_html, unsafe_allow_html=True)
+    except Exception:
+        st.dataframe(df if max_rows is None else df.head(max_rows), use_container_width=True, hide_index=True)
 
 
 def render_section_title(title, note=None):
@@ -2536,7 +2540,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V11.0 Wrapped Layout Edition
+# 分頁細節：V11.0a Layout Hotfix Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2705,7 +2709,7 @@ with tab_scenario:
         st.info("目前資料不足，無法產生明日劇本。")
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V11.0 Wrapped Layout Edition")
+    st.subheader("📈 個股K線分析 V11.0a Layout Hotfix Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -2913,7 +2917,7 @@ with tab_chart:
                 若是「強勢股創高 + 均線多頭 + 法人仍偏多」，系統會顯示 **強勢續抱 / 不追高**。
                 """)
 
-st.caption('Version 11.0 Wrapped Layout Edition')
+st.caption('Version 11.0a Layout Hotfix Edition')
 
 with tab_ai_market:
     st.subheader("🤖 AI / 半導體市場")
