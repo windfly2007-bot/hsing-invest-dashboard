@@ -12,7 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V11.0a Layout Hotfix Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V11.1 Unified Score Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -153,7 +153,7 @@ hr {
 }
 
 
-/* V11.0a Layout Hotfix Edition */
+/* V11.1 Unified Score Edition */
 .wrapped-table-card {
     background: #ffffff;
     border: 1px solid #e5e7eb;
@@ -1235,7 +1235,7 @@ def stock_diagnosis(stock_name, ticker, ai_score, steel_score, chip_score_map):
         return None
 
     current = float(get_display_price(ticker, df))
-    health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+    health = get_unified_score_value(stock_name, ticker, df, ai_score, steel_score, chip_score_map)
     distance, risk_text = risk_distance_from_ma(df)
     progress, buy_text = buy_point_progress(stock_name, current)
 
@@ -1632,8 +1632,52 @@ def portfolio_risk_dashboard(portfolio):
 
 
 
+
+def calc_unified_ai_score(stock_name, ticker, df, ai_score, steel_score, chip_score_map):
+    """V11.1 唯一AI總分來源：技術面40 + 籌碼面30 + 產業面30。"""
+    try:
+        tech_signal, tech_score = technical_signal(stock_name, ticker)
+        chip_score = chip_score_map.get(stock_name, 0)
+        chip_part = max(0, min(30, 15 + chip_score * 3))
+
+        if long_term_rules[stock_name]["type"] == "AI":
+            industry_score = ai_score
+        else:
+            industry_score = steel_score
+
+        industry_part = int(max(0, min(30, industry_score * 0.3)))
+        tech_part = int(max(0, min(40, tech_score * 0.4)))
+        total_score = int(max(0, min(100, tech_part + chip_part + industry_part)))
+
+        return {
+            "total": total_score,
+            "tech_part": tech_part,
+            "chip_part": int(chip_part),
+            "industry_part": industry_part,
+            "tech_signal": tech_signal,
+            "chip_score": chip_score,
+            "industry_score": industry_score,
+        }
+    except Exception:
+        fallback = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+        return {
+            "total": fallback,
+            "tech_part": 0,
+            "chip_part": 0,
+            "industry_part": 0,
+            "tech_signal": "-",
+            "chip_score": chip_score_map.get(stock_name, 0),
+            "industry_score": ai_score if long_term_rules[stock_name]["type"] == "AI" else steel_score,
+        }
+
+
+def get_unified_score_value(stock_name, ticker, df, ai_score, steel_score, chip_score_map):
+    return calc_unified_ai_score(stock_name, ticker, df, ai_score, steel_score, chip_score_map)["total"]
+
+
+
 def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
-    """V10.6 首頁決策卡：趨勢友善版。第一梯隊重視總分與續抱，不讓平盤股因低風險排太前。"""
+    """V11.1 決策卡：全部使用 AI診斷中心同一套總分。"""
     rows = []
 
     for stock_name, ticker in stock_list.items():
@@ -1642,7 +1686,9 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
             continue
 
         current = float(get_display_price(ticker, df))
-        health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+        score_detail = calc_unified_ai_score(stock_name, ticker, df, ai_score, steel_score, chip_score_map)
+        health = score_detail["total"]
+
         rule = long_term_rules[stock_name]
         add_price = float(rule["add"])
         reduce_price = float(rule["reduce"])
@@ -1652,32 +1698,21 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
 
         distance, risk_text = risk_distance_from_ma(df)
         trend_score, trend_detail = get_trend_score_details(df, chip_score_map.get(stock_name, 0))
-        is_breakout = bool(trend_detail.get("創60日高", False))
-
         action = action_by_heat_and_trend(current, reduce_price, health, trend_score, risk_text)
+
         if current <= add_price and health >= 65:
             action = "🟢 可分批加碼"
         elif 0 <= dist_add <= 3 and health >= 50 and "強勢" not in action and "續抱" not in action:
             action = "🟡 接近加碼區"
-        elif 0 <= dist_reduce <= 10 and health < 70:
-            action = "🟠 接近減碼區"
+        elif current >= reduce_price and is_strong_trend_hold(stock_name, df, current, health, chip_score_map.get(stock_name, 0)):
+            action = "🚀 強勢續抱"
 
-        # V10.8 第一梯隊排序：AI總分 + 趨勢分數為主。
-        # 強勢過熱加分，不直接扣成「最需注意」。
-        rank_score = health + trend_score * 0.35
-        if is_breakout:
-            rank_score += 10
-        if "強勢續抱" in action or "主升" in trend_detail.get("狀態", ""):
-            rank_score += 8
-        elif "續抱" in action:
-            rank_score += 4
+        # 第一梯隊：只用統一AI總分為主，趨勢只當同分輔助，不再出現64分卻卡片顯示76分
+        rank_score = health + min(5, trend_score * 0.05)
         if health < 65:
-            rank_score -= 15
-        if trend_score < 35:
-            rank_score -= 8
+            rank_score -= 20
 
-        # V10.8 最需注意：只抓「低分、趨勢轉弱、過熱轉弱」。
-        # 高分創高只列「不追高」，不列為最危險。
+        # 最需注意：低分優先；強勢高檔不列為最需注意
         caution_score = 0
         if health < 50:
             caution_score += 100
@@ -1687,13 +1722,16 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
             caution_score += 70
         if trend_score < 35 and health < 65:
             caution_score += 40
-        if current >= reduce_price and health < 70 and trend_score < 50:
+        if current >= reduce_price and health < 60 and trend_score < 50:
             caution_score += 40
 
         rows.append({
             "股票": stock_name,
             "現價": round(current, 2),
             "AI總分": health,
+            "技術面": score_detail["tech_part"],
+            "籌碼面": score_detail["chip_part"],
+            "產業面": score_detail["industry_part"],
             "趨勢分數": trend_score,
             "趨勢狀態": trend_detail.get("狀態", ""),
             "排序分數": round(rank_score, 1),
@@ -1710,22 +1748,24 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
     if df.empty:
         return {}
 
-    eligible_top = df[(df["AI總分"] >= 75) & (df["趨勢分數"] >= 50)].copy()
+    eligible_top = df[df["AI總分"] >= 65].copy()
     if eligible_top.empty:
         eligible_top = df.copy()
-    top_score = float(eligible_top["排序分數"].max())
-    top_group = eligible_top[eligible_top["排序分數"] >= top_score - 8].sort_values(["排序分數", "AI總分"], ascending=False)
+
+    top_score = int(eligible_top["AI總分"].max())
+    top_group = eligible_top[eligible_top["AI總分"] >= top_score - 2].sort_values(
+        ["AI總分", "趨勢分數"],
+        ascending=[False, False]
+    )
     top_group_names = "、".join(top_group["股票"].tolist())
 
     caution_df = df[df["注意分數"] > 0].copy()
     if caution_df.empty:
-        # 沒有真正需要注意時，抓最低分
         caution = df.sort_values(["AI總分"], ascending=True).iloc[0]
     else:
         caution = caution_df.sort_values(["注意分數", "AI總分"], ascending=[False, True]).iloc[0]
 
-    add_df = df[df["AI總分"] >= 50].copy()
-    add_df = add_df[add_df["距加碼%"] <= 5]
+    add_df = df[(df["AI總分"] >= 50) & (df["距加碼%"] <= 5)].copy()
     best_add = add_df.sort_values(["距加碼%", "AI總分"], ascending=[True, False]).iloc[0] if not add_df.empty else None
 
     forbidden_df = df[df["AI總分"] < 50]
@@ -1733,7 +1773,7 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
 
     return {
         "df": df,
-        "top_score": int(top_group["AI總分"].max()),
+        "top_score": top_score,
         "top_group_names": top_group_names,
         "top_group": top_group,
         "caution": caution,
@@ -1752,7 +1792,7 @@ def v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_scor
             continue
 
         current = float(get_display_price(ticker, df))
-        health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+        health = get_unified_score_value(stock_name, ticker, df, ai_score, steel_score, chip_score_map)
         strong_hold = is_strong_trend_hold(stock_name, df, current, health, chip_score_map.get(stock_name, 0))
         plan = smart_trade_plan(stock_name, current, portfolio, strong_hold)
         signal, reason = operation_signal(
@@ -1982,7 +2022,7 @@ def ai_investment_summary(portfolio, ai_score, steel_score, chip_score_map):
             continue
 
         current = float(get_display_price(ticker, df))
-        health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+        health = get_unified_score_value(stock_name, ticker, df, ai_score, steel_score, chip_score_map)
         _, risk_text = risk_distance_from_ma(df)
         signal, reason = operation_signal(
             stock_name,
@@ -2020,7 +2060,7 @@ def watchlist_today(portfolio, ai_score, steel_score, chip_score_map):
             continue
 
         current = float(get_display_price(ticker, df))
-        health = score_stock(stock_name, df, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+        health = get_unified_score_value(stock_name, ticker, df, ai_score, steel_score, chip_score_map)
         _, risk_text = risk_distance_from_ma(df)
         progress, buy_text = buy_point_progress(stock_name, current)
 
@@ -2219,7 +2259,7 @@ def build_auto_alerts(portfolio, ai_score, steel_score, chip_score_map):
             df_price = get_data(stock_list[stock_name], "1y")
             if not df_price.empty:
                 current_price = float(get_display_price(stock_list[stock_name], df_price))
-                health = score_stock(stock_name, df_price, ai_score, steel_score, chip_score_map.get(stock_name, 0))
+                health = get_unified_score_value(stock_name, stock_list[stock_name], df_price, ai_score, steel_score, chip_score_map)
                 strong_hold = is_strong_trend_hold(stock_name, df_price, current_price, health, chip_score_map.get(stock_name, 0))
                 plan = smart_trade_plan(stock_name, current_price, portfolio, strong_hold)
                 add_zones.append(plan["加碼區"])
@@ -2540,7 +2580,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V11.0a Layout Hotfix Edition
+# 分頁細節：V11.1 Unified Score Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2576,14 +2616,14 @@ with tab_overview:
 
         st.subheader("🎯 今日決策卡")
         d1, d2, d3, d4 = st.columns(4)
-        d1.success(f"🏆 第一梯隊：{top_group_names}｜{top_score}分")
+        d1.success(f"🏆 第一梯隊：{top_group_names}｜AI總分 {top_score}分")
         d2.warning(f"⚠️ 最需注意：{caution['股票']}｜距減碼 {caution['距減碼%']}%")
         if best_add is not None:
             d3.success(f"🟢 最佳加碼：{best_add['股票']}｜加碼價 {best_add['加碼價']}｜距加碼 {best_add['距加碼%']}%")
         else:
             d3.info("🟢 最佳加碼：目前沒有")
         if forbidden is not None:
-            d4.error(f"🔴 禁止加碼：{forbidden['股票']}｜{forbidden['AI總分']}分")
+            d4.error(f"🔴 禁止加碼：{forbidden['股票']}｜AI總分 {forbidden['AI總分']}分")
         else:
             d4.success("🔴 禁止加碼：目前沒有")
 
@@ -2709,7 +2749,7 @@ with tab_scenario:
         st.info("目前資料不足，無法產生明日劇本。")
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V11.0a Layout Hotfix Edition")
+    st.subheader("📈 個股K線分析 V11.1 Unified Score Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -2917,7 +2957,7 @@ with tab_chart:
                 若是「強勢股創高 + 均線多頭 + 法人仍偏多」，系統會顯示 **強勢續抱 / 不追高**。
                 """)
 
-st.caption('Version 11.0a Layout Hotfix Edition')
+st.caption('Version 11.1 Unified Score Edition')
 
 with tab_ai_market:
     st.subheader("🤖 AI / 半導體市場")
@@ -3066,19 +3106,13 @@ with tab_ai:
         if df_d.empty or len(df_d) < 120:
             continue
 
-        current = float(df_d.iloc[-1]["Close"])
-        tech_signal, tech_score = technical_signal(stock_name, ticker)
-        chip_score = chip_score_map.get(stock_name, 0)
-        chip_part = max(0, min(30, 15 + chip_score * 3))
-
-        if long_term_rules[stock_name]["type"] == "AI":
-            industry_score = ai_score
-        else:
-            industry_score = steel_score
-        industry_part = int(max(0, min(30, industry_score * 0.3)))
-
-        tech_part = int(max(0, min(40, tech_score * 0.4)))
-        total_score = int(max(0, min(100, tech_part + chip_part + industry_part)))
+        current = float(get_display_price(ticker, df_d))
+        score_detail = calc_unified_ai_score(stock_name, ticker, df_d, ai_score, steel_score, chip_score_map)
+        chip_score = score_detail["chip_score"]
+        tech_part = score_detail["tech_part"]
+        chip_part = score_detail["chip_part"]
+        industry_part = score_detail["industry_part"]
+        total_score = score_detail["total"]
 
         distance, risk_text = risk_distance_from_ma(df_d)
         trend_score, trend_detail = get_trend_score_details(df_d, chip_score)
@@ -3181,7 +3215,7 @@ with tab_ai:
 
             c1, c2 = st.columns(2)
             c1.success(
-                f"🏆 第一梯隊：{top_group_names}｜{top_score}分"
+                f"🏆 第一梯隊：{top_group_names}｜AI總分 {top_score}分"
             )
             c2.warning(
                 f"⚠️ 最需注意：{caution['股票']}｜現價 {caution['現價']}｜距減碼 {caution['距減碼%']}%｜{caution['動作']}"
