@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.8b Tab Order Fix Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.9 Long-Term Logic Display Fix Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -78,21 +78,27 @@ news_targets = {
 st.markdown("""
 <style>
 html, body, [class*="css"] { font-size: 22px; }
-.block-container { padding-top: 1.2rem; padding-left: 2rem; padding-right: 2rem; }
+.block-container { padding-top: 1.2rem; padding-left: 1.2rem; padding-right: 1.2rem; max-width: 98% !important; }
 h1 { font-size: 38px !important; font-weight: 900 !important; margin-top: 16px !important; line-height: 1.3 !important; }
 h2, h3 { font-size: 30px !important; font-weight: 900 !important; }
 
 table, th, td {
-    font-size: 21px !important;
+    font-size: 18px !important;
 }
 
 [data-testid="stMetricValue"] {
-    font-size: 34px !important;
+    font-size: 32px !important;
     font-weight: 900 !important;
 }
 
 [data-testid="stDataFrame"] {
-    font-size: 21px !important;
+    font-size: 18px !important;
+}
+
+/* V10.9 顯示修正：避免表格文字被切太多 */
+[data-testid="stDataFrame"] div[role="gridcell"],
+[data-testid="stDataFrame"] div[role="columnheader"] {
+    font-size: 18px !important;
 }
 
 .red-text { color:#ff3333; font-weight:900; }
@@ -1674,7 +1680,7 @@ def v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_scor
             ),
             "減碼區": plan["減碼區"],
             "距減碼": f"{dist_reduce:+.1f}%",
-            "建議減碼": "暫不減碼，強勢續抱" if strong_hold else (plan["建議股數"] if "減碼" in plan["建議股數"] else "暫不減碼"),
+            "建議減碼": "暫不減碼，強勢續抱" if strong_hold else (plan["建議股數"] if ("減碼" in plan["建議股數"] and "轉弱" in reason) else "暫不減碼"),
             "位置狀態": plan["位置狀態"],
             "理由": reason,
         })
@@ -2246,13 +2252,21 @@ def tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map):
         bearish = f"跌破 {support:.2f}，短線轉弱；若AI總分低於50則禁止加碼。"
 
         trend_score, _trend_detail = get_trend_score_details(df, chip_score_map.get(stock_name, 0))
+        strong_hold = is_strong_trend_hold(stock_name, df, current, health, chip_score_map.get(stock_name, 0))
+
+        # V10.9 長線邏輯：接近減碼區不等於減碼。
+        # 只有「高檔 + 趨勢轉弱」才出現減碼股數。
         if health < 50:
             action = "🔴 禁止加碼，等分數回到50以上"
-        elif (current >= reduce_price or (0 <= dist_reduce <= 5)) and health >= 75 and trend_score >= 50:
-            action = "🚀 強勢續抱，不追高"
-        elif current >= reduce_price or (0 <= dist_reduce <= 5):
+        elif current >= reduce_price and not strong_hold and trend_score < 50:
             reduce_shares = max(1, int(portfolio[stock_name]["shares"] * 0.1))
-            action = f"🟠 接近減碼區，可觀察減碼 {reduce_shares} 股"
+            action = f"🔴 趨勢轉弱，才考慮減碼 {reduce_shares} 股"
+        elif current >= reduce_price and strong_hold:
+            action = "🚀 強勢高檔續抱，不追高"
+        elif 0 <= dist_reduce <= 5 and strong_hold:
+            action = "🟠 接近減碼區但趨勢強，續抱不追高"
+        elif 0 <= dist_reduce <= 5:
+            action = "🟡 接近減碼區，先觀察支撐"
         elif current <= add_price and health >= 65:
             action = plan["建議股數"]
         else:
@@ -2409,7 +2423,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.8b Tab Order Fix Edition
+# 分頁細節：V10.9 Long-Term Logic Display Fix Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2461,13 +2475,38 @@ with tab_overview:
     scenario_preview = tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map)
     if not scenario_preview.empty:
         scenario_cols = [c for c in ["股票", "明日傾向", "支撐", "壓力", "建議動作"] if c in scenario_preview.columns]
-        st.dataframe(scenario_preview[scenario_cols], use_container_width=True, hide_index=True)
+        st.dataframe(
+            scenario_preview[scenario_cols],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "股票": st.column_config.TextColumn(width="small"),
+                "明日傾向": st.column_config.TextColumn(width="medium"),
+                "支撐": st.column_config.NumberColumn(width="small"),
+                "壓力": st.column_config.NumberColumn(width="small"),
+                "建議動作": st.column_config.TextColumn(width="large"),
+            },
+        )
 
 
     st.subheader("🚨 今日重要預警")
     if not alert_df.empty:
         alert_cols = [c for c in ["等級", "股票", "訊息", "加碼區", "減碼區", "位置狀態", "建議股數", "建議"] if c in alert_df.columns]
-        st.dataframe(alert_df[alert_cols].head(5), use_container_width=True, hide_index=True)
+        st.dataframe(
+            alert_df[alert_cols].head(5),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "等級": st.column_config.TextColumn(width="medium"),
+                "股票": st.column_config.TextColumn(width="small"),
+                "訊息": st.column_config.TextColumn(width="large"),
+                "加碼區": st.column_config.TextColumn(width="medium"),
+                "減碼區": st.column_config.TextColumn(width="medium"),
+                "位置狀態": st.column_config.TextColumn(width="medium"),
+                "建議股數": st.column_config.TextColumn(width="medium"),
+                "建議": st.column_config.TextColumn(width="large"),
+            },
+        )
     else:
         st.success("目前沒有重大預警。")
 
@@ -2475,7 +2514,21 @@ with tab_overview:
     if not summary_df.empty:
         # 首頁只保留操作決策，買點/健康度/觀察重點留到 AI診斷中心與持股中心
         keep_cols = [c for c in ["股票", "現價", "操作燈號", "加碼區", "減碼區", "位置狀態", "建議股數", "主要理由"] if c in summary_df.columns]
-        st.dataframe(summary_df[keep_cols], use_container_width=True, hide_index=True)
+        st.dataframe(
+            summary_df[keep_cols],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "股票": st.column_config.TextColumn(width="small"),
+                "現價": st.column_config.NumberColumn(width="small"),
+                "操作燈號": st.column_config.TextColumn(width="medium"),
+                "加碼區": st.column_config.TextColumn(width="medium"),
+                "減碼區": st.column_config.TextColumn(width="medium"),
+                "位置狀態": st.column_config.TextColumn(width="medium"),
+                "建議股數": st.column_config.TextColumn(width="medium"),
+                "主要理由": st.column_config.TextColumn(width="large"),
+            },
+        )
 
     st.subheader("🎯 V10 今日買賣計畫")
     trade_plan_df = v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_score_map)
@@ -2502,7 +2555,22 @@ with tab_scenario:
 
     if not scenario_df.empty:
         top_cols = [c for c in ["股票", "現價", "AI總分", "明日傾向", "支撐", "壓力", "加碼價", "減碼價", "建議動作"] if c in scenario_df.columns]
-        st.dataframe(scenario_df[top_cols], use_container_width=True, hide_index=True)
+        st.dataframe(
+            scenario_df[top_cols],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "股票": st.column_config.TextColumn(width="small"),
+                "現價": st.column_config.NumberColumn(width="small"),
+                "AI總分": st.column_config.NumberColumn(width="small"),
+                "明日傾向": st.column_config.TextColumn(width="medium"),
+                "支撐": st.column_config.NumberColumn(width="small"),
+                "壓力": st.column_config.NumberColumn(width="small"),
+                "加碼價": st.column_config.NumberColumn(width="small"),
+                "減碼價": st.column_config.NumberColumn(width="small"),
+                "建議動作": st.column_config.TextColumn(width="large"),
+            },
+        )
 
         st.subheader("📋 個股劇本細節")
         for _, row in scenario_df.iterrows():
@@ -2516,7 +2584,7 @@ with tab_scenario:
         st.info("目前資料不足，無法產生明日劇本。")
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V10.8b Tab Order Fix Edition")
+    st.subheader("📈 個股K線分析 V10.9 Long-Term Logic Display Fix Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -2724,7 +2792,7 @@ with tab_chart:
                 若是「強勢股創高 + 均線多頭 + 法人仍偏多」，系統會顯示 **強勢續抱 / 不追高**。
                 """)
 
-st.caption('Version 10.8b Tab Order Fix Edition')
+st.caption('Version 10.9 Long-Term Logic Display Fix Edition')
 
 with tab_ai_market:
     st.subheader("🤖 AI / 半導體市場")
