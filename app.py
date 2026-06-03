@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.6 Trend Friendly Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V10.7 AI Score Explain Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -2167,6 +2167,74 @@ def tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map):
     return pd.DataFrame(rows)
 
 
+
+def render_ai_score_explanation():
+    """AI頁面：顯示 AI市場溫度 / AI領先指數 計算方式說明。"""
+    st.subheader("🧮 AI 計算方式說明")
+
+    with st.expander("📌 AI市場溫度計算方式：起始50分，依市場指標加減分", expanded=True):
+        st.markdown("""
+**AI市場溫度** 用來判斷 AI / 半導體大環境的冷熱度。
+
+**起始分數：50 分**
+
+| 指標 | 權重 | 加分條件 | 扣分條件 |
+|---|---:|---|---|
+| 台積電 ADR / TSM | 10 | 上漲 +10 | 下跌 -10 |
+| 輝達 / NVDA | 10 | 上漲 +10 | 下跌 -10 |
+| 費城半導體 / SOX | 10 | 上漲 +10 | 下跌 -10 |
+| NASDAQ | 8 | 上漲 +8 | 下跌 -8 |
+| 美債10年殖利率 | 8 | 下跌 +8 | 上漲 -8 |
+| VIX恐慌指數 | 8 | 下跌 +8 | 上漲 -8 |
+| 美元指數 DXY | 6 | 下跌 +6 | 上漲 -6 |
+
+**分數會限制在 0~100 分之間。**
+        """)
+
+        st.markdown("""
+**判讀區間**
+
+| 分數 | 判斷 | 操作含意 |
+|---:|---|---|
+| 80分以上 | 🟢 AI環境強勢 | 長線續抱，但避免追高 |
+| 60~79分 | 🔵 中性偏多 | 可續抱，拉回再分批 |
+| 40~59分 | 🟡 中性偏弱 | 停止追價，等支撐 |
+| 40分以下 | 🔴 偏弱 | 短線保守，暫緩加碼 |
+        """)
+
+    with st.expander("📌 AI領先指數計算方式：更重視關鍵領先股與風險指標", expanded=True):
+        st.markdown("""
+**AI領先指數** 用來判斷 AI供應鏈明日或短線氣氛，權重比 AI市場溫度更集中在領先股。
+
+**起始分數：50 分**
+
+| 指標 | 權重 | 加分條件 | 扣分條件 |
+|---|---:|---|---|
+| 輝達 / NVDA | 18 | 上漲 +18 | 下跌 -18 |
+| 台積電 ADR / TSM | 18 | 上漲 +18 | 下跌 -18 |
+| 費城半導體 / SOX | 16 | 上漲 +16 | 下跌 -16 |
+| NASDAQ | 10 | 上漲 +10 | 下跌 -10 |
+| VIX恐慌指數 | 10 | 下跌 +10 | 上漲 -10 |
+| 美債10年殖利率 | 8 | 下跌 +8 | 上漲 -8 |
+| 美元指數 DXY | 6 | 下跌 +6 | 上漲 -6 |
+
+**分數會限制在 0~100 分之間。**
+        """)
+
+        st.markdown("""
+**判讀區間**
+
+| 分數 | 判斷 |
+|---:|---|
+| 75分以上 | 🟢 AI領先指數偏多 |
+| 55~74分 | 🔵 AI領先指數中性偏多 |
+| 40~54分 | 🟡 AI領先指數中性偏弱 |
+| 40分以下 | 🔴 AI領先指數偏弱 |
+        """)
+
+    st.info("提醒：AI分數是輔助判斷，不是單獨買賣訊號。長線操作仍要搭配加碼區、減碼區、法人籌碼與個股技術面。")
+
+
 # =====================================================
 # 主畫面：V7.2 精簡版
 # =====================================================
@@ -2231,7 +2299,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.6 Trend Friendly Edition
+# 分頁細節：V10.7 AI Score Explain Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2434,6 +2502,8 @@ with tab_ai_market:
     leader_score, leader_msg = leader_index_score()
     st.metric("AI領先指數", f"{leader_score} 分")
     st.info(leader_msg)
+
+    render_ai_score_explanation()
 
     st.subheader("🌙 台積電 ADR / 美股隔日提示")
     adr_info = adr_prediction_text()
@@ -2710,7 +2780,7 @@ with tab_ai:
 
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V10.6 Trend Friendly Edition")
+    st.subheader("📈 個股K線分析 V10.7 AI Score Explain Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
