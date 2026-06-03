@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V10.9 Long-Term Logic Display Fix Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板 V11.0 Wrapped Layout Edition", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -151,8 +151,121 @@ hr {
     margin-bottom: 1.8rem !important;
 }
 
+
+/* V11.0 Wrapped Layout Edition */
+.wrapped-table-card {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    padding: 10px 12px;
+    margin: 12px 0 22px 0;
+    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+    overflow-x: auto;
+}
+.wrapped-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+.wrapped-table th {
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 17px;
+    font-weight: 800;
+    padding: 12px 10px;
+    border-bottom: 1px solid #e5e7eb;
+    text-align: left;
+    white-space: normal;
+    word-break: keep-all;
+}
+.wrapped-table td {
+    color: #111827;
+    font-size: 17px;
+    line-height: 1.55;
+    padding: 12px 10px;
+    border-bottom: 1px solid #eef2f7;
+    vertical-align: top;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+.wrapped-table tr:last-child td {
+    border-bottom: none;
+}
+.wrapped-table tr:hover td {
+    background: #f9fafb;
+}
+.section-card {
+    background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+    border: 1px solid #e5e7eb;
+    border-radius: 18px;
+    padding: 18px 20px;
+    margin: 18px 0;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+}
+.section-subtle {
+    color: #64748b;
+    font-size: 16px;
+    margin-top: -4px;
+    margin-bottom: 10px;
+}
+
 </style>
 """, unsafe_allow_html=True)
+
+
+
+
+def render_wrapped_table(df, column_widths=None, max_rows=None):
+    """顯示可換行的表格，避免 Streamlit dataframe 文字被截斷。"""
+    if df is None or df.empty:
+        st.info("目前沒有資料。")
+        return
+
+    show_df = df.copy()
+    if max_rows is not None:
+        show_df = show_df.head(max_rows)
+
+    column_widths = column_widths or {}
+
+    colgroup = ""
+    if column_widths:
+        colgroup = "<colgroup>"
+        for col in show_df.columns:
+            width = column_widths.get(col, None)
+            if width:
+                colgroup += f'<col style="width:{width};">'
+            else:
+                colgroup += "<col>"
+        colgroup += "</colgroup>"
+
+    header = "".join(f"<th>{html.escape(str(col))}</th>" for col in show_df.columns)
+    body_rows = []
+
+    for _, row in show_df.iterrows():
+        cells = []
+        for col in show_df.columns:
+            value = row[col]
+            if pd.isna(value):
+                value = ""
+            text_value = html.escape(str(value))
+            cells.append(f"<td>{text_value}</td>")
+        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+
+    table_html = f"""
+    <div class="wrapped-table-card">
+        <table class="wrapped-table">
+            {colgroup}
+            <thead><tr>{header}</tr></thead>
+            <tbody>{''.join(body_rows)}</tbody>
+        </table>
+    </div>
+    """
+    st.markdown(table_html, unsafe_allow_html=True)
+
+
+def render_section_title(title, note=None):
+    st.markdown(f'<div class="section-card"><h3>{html.escape(title)}</h3>' + (f'<div class="section-subtle">{html.escape(note)}</div>' if note else '') + '</div>', unsafe_allow_html=True)
 
 
 
@@ -2423,7 +2536,7 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 
 # =====================================================
 # =====================================================
-# 分頁細節：V10.9 Long-Term Logic Display Fix Edition
+# 分頁細節：V11.0 Wrapped Layout Edition
 # =====================================================
 
 tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
@@ -2471,70 +2584,80 @@ with tab_overview:
             d4.success("🔴 禁止加碼：目前沒有")
 
 
+    st.markdown("---")
     st.subheader("🔮 明日劇本摘要")
     scenario_preview = tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map)
     if not scenario_preview.empty:
         scenario_cols = [c for c in ["股票", "明日傾向", "支撐", "壓力", "建議動作"] if c in scenario_preview.columns]
-        st.dataframe(
+        render_wrapped_table(
             scenario_preview[scenario_cols],
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "股票": st.column_config.TextColumn(width="small"),
-                "明日傾向": st.column_config.TextColumn(width="medium"),
-                "支撐": st.column_config.NumberColumn(width="small"),
-                "壓力": st.column_config.NumberColumn(width="small"),
-                "建議動作": st.column_config.TextColumn(width="large"),
+            column_widths={
+                "股票": "10%",
+                "明日傾向": "18%",
+                "支撐": "12%",
+                "壓力": "12%",
+                "建議動作": "48%",
             },
         )
 
 
+    st.markdown("---")
     st.subheader("🚨 今日重要預警")
     if not alert_df.empty:
         alert_cols = [c for c in ["等級", "股票", "訊息", "加碼區", "減碼區", "位置狀態", "建議股數", "建議"] if c in alert_df.columns]
-        st.dataframe(
+        render_wrapped_table(
             alert_df[alert_cols].head(5),
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "等級": st.column_config.TextColumn(width="medium"),
-                "股票": st.column_config.TextColumn(width="small"),
-                "訊息": st.column_config.TextColumn(width="large"),
-                "加碼區": st.column_config.TextColumn(width="medium"),
-                "減碼區": st.column_config.TextColumn(width="medium"),
-                "位置狀態": st.column_config.TextColumn(width="medium"),
-                "建議股數": st.column_config.TextColumn(width="medium"),
-                "建議": st.column_config.TextColumn(width="large"),
+            column_widths={
+                "等級": "11%",
+                "股票": "8%",
+                "訊息": "24%",
+                "加碼區": "11%",
+                "減碼區": "11%",
+                "位置狀態": "13%",
+                "建議股數": "11%",
+                "建議": "11%",
             },
         )
     else:
         st.success("目前沒有重大預警。")
 
+    st.markdown("---")
     st.subheader("🚦 今日操作燈號")
     if not summary_df.empty:
         # 首頁只保留操作決策，買點/健康度/觀察重點留到 AI診斷中心與持股中心
         keep_cols = [c for c in ["股票", "現價", "操作燈號", "加碼區", "減碼區", "位置狀態", "建議股數", "主要理由"] if c in summary_df.columns]
-        st.dataframe(
+        render_wrapped_table(
             summary_df[keep_cols],
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "股票": st.column_config.TextColumn(width="small"),
-                "現價": st.column_config.NumberColumn(width="small"),
-                "操作燈號": st.column_config.TextColumn(width="medium"),
-                "加碼區": st.column_config.TextColumn(width="medium"),
-                "減碼區": st.column_config.TextColumn(width="medium"),
-                "位置狀態": st.column_config.TextColumn(width="medium"),
-                "建議股數": st.column_config.TextColumn(width="medium"),
-                "主要理由": st.column_config.TextColumn(width="large"),
+            column_widths={
+                "股票": "8%",
+                "現價": "8%",
+                "操作燈號": "13%",
+                "加碼區": "13%",
+                "減碼區": "13%",
+                "位置狀態": "15%",
+                "建議股數": "15%",
+                "主要理由": "15%",
             },
         )
 
+    st.markdown("---")
     st.subheader("🎯 V10 今日買賣計畫")
     trade_plan_df = v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_score_map)
     if not trade_plan_df.empty:
         compact_cols = [c for c in ["股票", "現價", "AI燈號", "加碼區", "建議加碼", "減碼區", "建議減碼", "位置狀態"] if c in trade_plan_df.columns]
-        st.dataframe(trade_plan_df[compact_cols], use_container_width=True, hide_index=True)
+        render_wrapped_table(
+            trade_plan_df[compact_cols],
+            column_widths={
+                "股票": "8%",
+                "現價": "8%",
+                "AI燈號": "14%",
+                "加碼區": "14%",
+                "建議加碼": "14%",
+                "減碼區": "14%",
+                "建議減碼": "14%",
+                "位置狀態": "14%",
+            },
+        )
 
     st.subheader("🧭 投資組合風險")
     risk_df, ai_pct, steel_pct, risk_label, risk_note = portfolio_risk_dashboard(portfolio)
@@ -2555,20 +2678,18 @@ with tab_scenario:
 
     if not scenario_df.empty:
         top_cols = [c for c in ["股票", "現價", "AI總分", "明日傾向", "支撐", "壓力", "加碼價", "減碼價", "建議動作"] if c in scenario_df.columns]
-        st.dataframe(
+        render_wrapped_table(
             scenario_df[top_cols],
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "股票": st.column_config.TextColumn(width="small"),
-                "現價": st.column_config.NumberColumn(width="small"),
-                "AI總分": st.column_config.NumberColumn(width="small"),
-                "明日傾向": st.column_config.TextColumn(width="medium"),
-                "支撐": st.column_config.NumberColumn(width="small"),
-                "壓力": st.column_config.NumberColumn(width="small"),
-                "加碼價": st.column_config.NumberColumn(width="small"),
-                "減碼價": st.column_config.NumberColumn(width="small"),
-                "建議動作": st.column_config.TextColumn(width="large"),
+            column_widths={
+                "股票": "8%",
+                "現價": "8%",
+                "AI總分": "8%",
+                "明日傾向": "13%",
+                "支撐": "8%",
+                "壓力": "8%",
+                "加碼價": "9%",
+                "減碼價": "9%",
+                "建議動作": "29%",
             },
         )
 
@@ -2584,7 +2705,7 @@ with tab_scenario:
         st.info("目前資料不足，無法產生明日劇本。")
 
 with tab_chart:
-    st.subheader("📈 個股K線分析 V10.9 Long-Term Logic Display Fix Edition")
+    st.subheader("📈 個股K線分析 V11.0 Wrapped Layout Edition")
 
     selected_stock = st.selectbox("選擇股票", list(stock_list.keys()))
     period = st.selectbox("期間", ["1mo", "3mo", "6mo", "1y", "3y"], index=3)
@@ -2792,7 +2913,7 @@ with tab_chart:
                 若是「強勢股創高 + 均線多頭 + 法人仍偏多」，系統會顯示 **強勢續抱 / 不追高**。
                 """)
 
-st.caption('Version 10.9 Long-Term Logic Display Fix Edition')
+st.caption('Version 11.0 Wrapped Layout Edition')
 
 with tab_ai_market:
     st.subheader("🤖 AI / 半導體市場")
@@ -3144,7 +3265,21 @@ with tab_portfolio:
     st.subheader("🎯 AI買賣計畫中心")
     trade_plan_df = v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_score_map)
     if not trade_plan_df.empty:
-        st.dataframe(trade_plan_df, use_container_width=True, hide_index=True)
+        render_wrapped_table(
+            trade_plan_df,
+            column_widths={
+                "股票": "7%",
+                "AI總分": "7%",
+                "長線建議": "12%",
+                "現價": "7%",
+                "AI燈號": "12%",
+                "加碼區": "10%",
+                "建議加碼": "12%",
+                "減碼區": "10%",
+                "建議減碼": "12%",
+                "位置狀態": "11%",
+            },
+        )
 
     st.subheader("🧭 投資組合風險儀表板")
     risk_df, ai_pct, steel_pct, risk_label, risk_note = portfolio_risk_dashboard(portfolio)
