@@ -526,16 +526,81 @@ def score_stock(stock_name, df, ai_score, steel_score, chip_score_20=0):
 
     distance, _ = risk_distance_from_ma(df)
     if distance is not None:
-        # V10.6：避免強勢股創高時被扣太重。
-        # 25~50% 只視為強勢延伸，不大幅扣分；50%以上才小扣。
+        # V10.7：風險扣分改輕。強勢股創高時不應被大幅扣分。
+        # 真正需要減碼的是「過熱 + 趨勢轉弱」，不是單純過熱。
         if distance >= 60:
-            score -= 8
+            score -= 6
         elif distance >= 50:
-            score -= 4
+            score -= 3
+        elif distance >= 35:
+            score -= 1
         elif distance <= -5:
             score += 8
 
     return int(max(0, min(100, score)))
+
+
+def get_trend_score_details(df, chip_score_20=0):
+    """V10.7 趨勢分數：用來區分「強勢過熱」與「弱勢過熱」。"""
+    if df.empty or len(df) < 120:
+        return 0, {"狀態": "資料不足"}
+
+    close = float(df.iloc[-1]["Close"])
+    ma5 = float(df["Close"].rolling(5).mean().iloc[-1])
+    ma10 = float(df["Close"].rolling(10).mean().iloc[-1])
+    ma20 = float(df["Close"].rolling(20).mean().iloc[-1])
+    ma60 = float(df["Close"].rolling(60).mean().iloc[-1])
+    ma120 = float(df["Close"].rolling(120).mean().iloc[-1])
+    high60 = float(df["Close"].tail(60).max())
+
+    score = 0
+    score += 10 if close > ma5 else 0
+    score += 10 if close > ma10 else 0
+    score += 10 if close > ma20 else 0
+    score += 10 if ma5 > ma10 else 0
+    score += 10 if ma10 > ma20 else 0
+    score += 10 if close > ma60 else 0
+    score += 10 if close > ma120 else 0
+    is_breakout = close >= high60 * 0.99
+    score += 15 if is_breakout else 0
+    score += 10 if chip_score_20 > 0 else 0
+
+    distance20 = (close - ma20) / ma20 * 100 if ma20 else 0
+    status = "🚀 主升段" if score >= 70 else ("🟢 多頭續抱" if score >= 50 else ("🟡 整理觀察" if score >= 30 else "🔴 趨勢偏弱"))
+
+    return int(min(100, score)), {
+        "狀態": status,
+        "現價": close,
+        "MA5": ma5,
+        "MA10": ma10,
+        "MA20": ma20,
+        "MA60": ma60,
+        "MA120": ma120,
+        "創60日高": is_breakout,
+        "距MA20%": distance20,
+        "法人籌碼20日": chip_score_20,
+    }
+
+
+def action_by_heat_and_trend(current, reduce_price, health, trend_score, risk_text):
+    """V10.7 動作判斷：過熱不等於減碼，強勢過熱改為續抱不追高。"""
+    if health < 40:
+        return "🔴 禁止加碼"
+    if health < 50:
+        return "🟠 不建議加碼"
+
+    is_hot = (current >= reduce_price) or ("過熱" in str(risk_text)) or ("極強趨勢" in str(risk_text))
+
+    if is_hot and health >= 80 and trend_score >= 60:
+        return "🚀 強勢續抱｜不追高"
+    if is_hot and trend_score >= 50:
+        return "🟠 強勢過熱｜續抱不追高"
+    if is_hot and trend_score < 50:
+        return "🔴 過熱轉弱｜減碼觀察"
+
+    if health >= 75:
+        return "🔵 續抱"
+    return "🟡 觀察"
 
 
 @st.cache_data(ttl=3600)
@@ -1282,10 +1347,14 @@ def fear_greed_index(ai_score, steel_score):
 def operation_signal(stock_name, current_price, health_score, chip_score, risk_text):
     progress, buy_text = buy_point_progress(stock_name, current_price)
 
-    if "極強趨勢" in risk_text:
-        return "🟠 續抱不追高", "趨勢很強但乖離偏大，長線先續抱"
-    if "過熱" in risk_text:
-        return "🟠 部分獲利觀察", "高檔乖離偏大，可觀察是否需要小幅調節"
+    # V10.7：過熱不等於減碼。
+    # 高分 + 籌碼不差時，過熱只提醒「續抱、不追高」。
+    if "極強趨勢" in str(risk_text) or "過熱" in str(risk_text):
+        if health_score >= 75 and chip_score >= 0:
+            return "🚀 強勢續抱", "強勢過熱，不追高；只有跌破支撐或法人轉賣才減碼"
+        if health_score >= 60:
+            return "🟠 續抱不追高", "短線偏熱，先觀察支撐，不急著減碼"
+        return "🔴 過熱轉弱", "過熱但健康度不足，若跌破支撐可減碼"
 
     if current_price <= long_term_rules[stock_name]["add"] and health_score >= 60:
         return "🟢 可加碼", "進入加碼區且健康度可接受"
@@ -1459,56 +1528,51 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
         dist_reduce = (reduce_price - current) / current * 100 if current else 999
 
         distance, risk_text = risk_distance_from_ma(df)
-        is_breakout = current >= float(df["Close"].tail(60).max()) * 0.99
+        trend_score, trend_detail = get_trend_score_details(df, chip_score_map.get(stock_name, 0))
+        is_breakout = bool(trend_detail.get("創60日高", False))
 
-        if health < 40:
-            action = "🔴 禁止加碼"
-        elif health < 50:
-            action = "🟠 不建議加碼"
-        elif current >= reduce_price:
-            # 長線模式：到減碼價先列為「獲利觀察」，不要直接變成最需注意
-            action = "🟠 獲利觀察"
-        elif 0 <= dist_reduce <= 10:
-            action = "🟠 接近減碼區"
-        elif current <= add_price and health >= 65:
+        action = action_by_heat_and_trend(current, reduce_price, health, trend_score, risk_text)
+        if current <= add_price and health >= 65:
             action = "🟢 可分批加碼"
-        elif 0 <= dist_add <= 3 and health >= 50:
+        elif 0 <= dist_add <= 3 and health >= 50 and "強勢" not in action and "續抱" not in action:
             action = "🟡 接近加碼區"
-        elif health >= 75:
-            action = "🔵 續抱"
-        else:
-            action = "🟡 觀察"
+        elif 0 <= dist_reduce <= 10 and health < 70:
+            action = "🟠 接近減碼區"
 
-        # 第一梯隊排序分數：總分為主，突破/續抱加分；低產業分數或低總分不會因平盤而排前。
-        rank_score = health
+        # V10.7 第一梯隊排序：AI總分 + 趨勢分數為主。
+        # 強勢過熱加分，不直接扣成「最需注意」。
+        rank_score = health + trend_score * 0.35
         if is_breakout:
+            rank_score += 10
+        if "強勢續抱" in action or "主升" in trend_detail.get("狀態", ""):
+            rank_score += 8
+        elif "續抱" in action:
             rank_score += 4
-        if "續抱" in action:
-            rank_score += 2
-        if "獲利觀察" in action:
-            rank_score += 1
         if health < 65:
             rank_score -= 15
+        if trend_score < 35:
+            rank_score -= 8
 
-        # 最需注意分數：低分/禁止加碼優先；高分創高只列獲利觀察，不當成最大風險。
+        # V10.7 最需注意：只抓「低分、趨勢轉弱、過熱轉弱」。
+        # 高分創高只列「不追高」，不列為最危險。
         caution_score = 0
         if health < 50:
             caution_score += 100
-        elif "禁止" in action or "不建議" in action:
+        if "禁止" in action or "不建議" in action:
             caution_score += 80
-        elif current >= reduce_price and health < 70:
-            caution_score += 60
-        elif 0 <= dist_reduce <= 5 and health < 70:
+        if "過熱轉弱" in action:
+            caution_score += 70
+        if trend_score < 35 and health < 65:
             caution_score += 40
-        elif current >= reduce_price and health >= 70:
-            caution_score += 15
-        elif 0 <= dist_reduce <= 5 and health >= 70:
-            caution_score += 10
+        if current >= reduce_price and health < 70 and trend_score < 50:
+            caution_score += 40
 
         rows.append({
             "股票": stock_name,
             "現價": round(current, 2),
             "AI總分": health,
+            "趨勢分數": trend_score,
+            "趨勢狀態": trend_detail.get("狀態", ""),
             "排序分數": round(rank_score, 1),
             "注意分數": round(caution_score, 1),
             "加碼價": add_price,
@@ -1523,8 +1587,11 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
     if df.empty:
         return {}
 
-    top_score = float(df["排序分數"].max())
-    top_group = df[df["排序分數"] >= top_score - 3].sort_values(["排序分數", "AI總分"], ascending=False)
+    eligible_top = df[(df["AI總分"] >= 75) & (df["趨勢分數"] >= 50)].copy()
+    if eligible_top.empty:
+        eligible_top = df.copy()
+    top_score = float(eligible_top["排序分數"].max())
+    top_group = eligible_top[eligible_top["排序分數"] >= top_score - 8].sort_values(["排序分數", "AI總分"], ascending=False)
     top_group_names = "、".join(top_group["股票"].tolist())
 
     caution_df = df[df["注意分數"] > 0].copy()
@@ -1543,7 +1610,7 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
 
     return {
         "df": df,
-        "top_score": int(df["AI總分"].max()),
+        "top_score": int(top_group["AI總分"].max()),
         "top_group_names": top_group_names,
         "top_group": top_group,
         "caution": caution,
@@ -2068,8 +2135,11 @@ def tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map):
         neutral = f"在 {support:.2f} ~ {resistance:.2f} 間震盪，先不追價。"
         bearish = f"跌破 {support:.2f}，短線轉弱；若AI總分低於50則禁止加碼。"
 
+        trend_score, _trend_detail = get_trend_score_details(df, chip_score_map.get(stock_name, 0))
         if health < 50:
             action = "🔴 禁止加碼，等分數回到50以上"
+        elif (current >= reduce_price or (0 <= dist_reduce <= 5)) and health >= 75 and trend_score >= 50:
+            action = "🚀 強勢續抱，不追高"
         elif current >= reduce_price or (0 <= dist_reduce <= 5):
             reduce_shares = max(1, int(portfolio[stock_name]["shares"] * 0.1))
             action = f"🟠 接近減碼區，可觀察減碼 {reduce_shares} 股"
@@ -2515,6 +2585,7 @@ with tab_ai:
         total_score = int(max(0, min(100, tech_part + chip_part + industry_part)))
 
         distance, risk_text = risk_distance_from_ma(df_d)
+        trend_score, trend_detail = get_trend_score_details(df_d, chip_score)
         signal, reason = operation_signal(
             stock_name,
             current,
@@ -2545,6 +2616,8 @@ with tab_ai:
             "技術面": f"{tech_part}/40",
             "籌碼面": f"{chip_part}/30",
             "產業面": f"{industry_part}/30",
+            "趨勢分數": trend_score,
+            "趨勢狀態": trend_detail.get("狀態", ""),
             "總分": total_score,
             "AI燈號": signal,
             "法人共振": resonance,
@@ -2802,4 +2875,47 @@ with tab_chart:
 
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption('Version 10.6 Trend Friendly Edition')
+        # V10.7：AI分數計算細節，讓使用者知道為什麼是續抱/不追高/減碼觀察
+        detail_df = get_data(stock_list[selected_stock], "1y")
+        if not detail_df.empty and len(detail_df) >= 120:
+            health = score_stock(selected_stock, detail_df, ai_score, steel_score, chip_score_map.get(selected_stock, 0))
+            trend_score, trend_detail = get_trend_score_details(detail_df, chip_score_map.get(selected_stock, 0))
+            distance, risk_text = risk_distance_from_ma(detail_df)
+            rule = long_term_rules[selected_stock]
+            action = action_by_heat_and_trend(
+                float(get_display_price(stock_list[selected_stock], detail_df)),
+                float(rule["reduce"]),
+                health,
+                trend_score,
+                risk_text,
+            )
+
+            with st.expander("📌 AI分數計算細節 / 強勢過熱判斷", expanded=False):
+                c1, c2, c3 = st.columns(3)
+                c1.metric("AI總分", f"{health} 分")
+                c2.metric("趨勢分數", f"{trend_score} 分", trend_detail.get("狀態", ""))
+                c3.metric("目前動作", action)
+
+                st.markdown(f"""
+                **AI總分邏輯**  
+                AI總分 = 均線趨勢 + 產業溫度 + 法人籌碼 + 風險調整。
+
+                **趨勢分數細節**
+                - 股價 > MA5：{'✅' if trend_detail.get('現價', 0) > trend_detail.get('MA5', 10**9) else '❌'}
+                - 股價 > MA10：{'✅' if trend_detail.get('現價', 0) > trend_detail.get('MA10', 10**9) else '❌'}
+                - 股價 > MA20：{'✅' if trend_detail.get('現價', 0) > trend_detail.get('MA20', 10**9) else '❌'}
+                - MA5 > MA10：{'✅' if trend_detail.get('MA5', 0) > trend_detail.get('MA10', 10**9) else '❌'}
+                - MA10 > MA20：{'✅' if trend_detail.get('MA10', 0) > trend_detail.get('MA20', 10**9) else '❌'}
+                - 創近60日高：{'✅' if trend_detail.get('創60日高', False) else '❌'}
+                - 法人20日籌碼：{trend_detail.get('法人籌碼20日', 0):+.1f}
+
+                **風險說明**  
+                {risk_text}
+
+                **核心判斷規則**  
+                ⚠️ 過熱不等於減碼。  
+                只有「過熱 + 趨勢轉弱」才會進入減碼觀察。  
+                若是「強勢股創高 + 均線多頭 + 法人仍偏多」，系統會顯示 **強勢續抱 / 不追高**。
+                """)
+
+st.caption('Version 10.7 Trend Friendly Long-Term Edition')
