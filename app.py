@@ -580,6 +580,16 @@ def data_update_status():
     return f"資料更新時間：{now_text}｜價格來源優先順序：TWSE即時 → TWSE收盤 → Yahoo Finance"
 
 
+def is_public_mode():
+    """公開部署預設不讀取/儲存個人持股，避免 GitHub 或 Streamlit Cloud 洩漏部位。"""
+    value = os.getenv("PUBLIC_MODE", "true")
+    try:
+        value = st.secrets.get("PUBLIC_MODE", value)
+    except Exception:
+        pass
+    return str(value).lower() not in ("0", "false", "no", "off")
+
+
 def create_default_csv():
     df = pd.DataFrame([
         {"股票": k, "股數": v["shares"], "成本": v["cost"]}
@@ -589,6 +599,9 @@ def create_default_csv():
 
 
 def load_portfolio():
+    if is_public_mode():
+        return {}
+
     if not os.path.exists(PORTFOLIO_FILE):
         create_default_csv()
     df = pd.read_csv(PORTFOLIO_FILE)
@@ -596,11 +609,17 @@ def load_portfolio():
     for _, row in df.iterrows():
         name = row["股票"]
         if name in stock_list:
-            result[name] = {"shares": int(row["股數"]), "cost": float(row["成本"])}
+            shares = int(row["股數"])
+            cost = float(row["成本"])
+            if shares > 0 and cost > 0:
+                result[name] = {"shares": shares, "cost": cost}
     return result
 
 
 def save_portfolio(portfolio):
+    if is_public_mode():
+        return
+
     df = pd.DataFrame([
         {"股票": k, "股數": v["shares"], "成本": v["cost"]}
         for k, v in portfolio.items()
