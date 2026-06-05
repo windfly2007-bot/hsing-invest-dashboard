@@ -3074,31 +3074,39 @@ if refresh_col.button("🔄 更新", key="refresh_price_button_1", use_container
 
 
 
+public_mode = is_public_mode()
 saved_portfolio = load_portfolio()
 
 with st.sidebar:
-    st.header("⚙️ 持股與資金設定")
-    st.caption("調整持股、成本與本月可投入資金。")
+    if public_mode:
+        st.header("⚙️ 公開展示模式")
+        st.caption("公開版已隱藏持股、成本、資金與損益資料。")
+        fee_discount = 0.52
+        cash_input = 0
+        portfolio = {}
+    else:
+        st.header("⚙️ 持股與資金設定")
+        st.caption("調整持股、成本與本月可投入資金。")
 
-    fee_discount = st.number_input("元大手續費折扣", min_value=0.52, max_value=1.0, value=0.52, step=0.01)
-    cash_input = st.number_input("本月可投入資金", min_value=0, value=30000, step=1000)
+        fee_discount = st.number_input("元大手續費折扣", min_value=0.52, max_value=1.0, value=0.52, step=0.01)
+        cash_input = st.number_input("本月可投入資金", min_value=0, value=30000, step=1000)
 
-    portfolio = {}
+        portfolio = {}
 
-    for stock_name in stock_list.keys():
-        st.markdown(f"### {stock_name}")
-        default_shares = saved_portfolio.get(stock_name, {"shares": 0})["shares"]
-        default_cost = saved_portfolio.get(stock_name, {"cost": 0.0})["cost"]
+        for stock_name in stock_list.keys():
+            st.markdown(f"### {stock_name}")
+            default_shares = saved_portfolio.get(stock_name, {"shares": 0})["shares"]
+            default_cost = saved_portfolio.get(stock_name, {"cost": 0.0})["cost"]
 
-        shares = st.number_input(f"{stock_name} 股數", min_value=0, value=int(default_shares), step=1)
-        cost = st.number_input(f"{stock_name} 成本價", min_value=0.0, value=float(default_cost), step=0.01, format="%.2f")
+            shares = st.number_input(f"{stock_name} 股數", min_value=0, value=int(default_shares), step=1)
+            cost = st.number_input(f"{stock_name} 成本價", min_value=0.0, value=float(default_cost), step=0.01, format="%.2f")
 
-        if shares > 0 and cost > 0:
-            portfolio[stock_name] = {"shares": shares, "cost": cost}
+            if shares > 0 and cost > 0:
+                portfolio[stock_name] = {"shares": shares, "cost": cost}
 
-    if st.button("💾 儲存持股"):
-        save_portfolio(portfolio)
-        st.success("持股資料已儲存")
+        if st.button("💾 儲存持股"):
+            save_portfolio(portfolio)
+            st.success("持股資料已儲存")
 
 ai_score = ai_temperature()
 steel_score = steel_temperature()
@@ -3138,17 +3146,23 @@ tab_overview, tab_reversal, tab_scenario, tab_chart, tab_ai_market, tab_steel, t
     "🏦 法人籌碼",
     "📰 新聞",
     "🧠 AI診斷",
-    "💰 持股",
+    "🔒 私人資料" if public_mode else "💰 持股",
 ])
 
 with tab_overview:
     st.subheader("📊 今日總覽")
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("恐慌貪婪", f"{fg_score} 分")
-    c2.metric("AI溫度", f"{ai_score} 分")
-    c3.metric("鋼鐵溫度", f"{steel_score} 分")
-    c4.metric("預估股息", f"{total_div:,.0f} 元")
+    if public_mode:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("恐慌貪婪", f"{fg_score} 分")
+        c2.metric("AI溫度", f"{ai_score} 分")
+        c3.metric("追蹤標的", f"{len(stock_list)} 檔")
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("恐慌貪婪", f"{fg_score} 分")
+        c2.metric("AI溫度", f"{ai_score} 分")
+        c3.metric("鋼鐵溫度", f"{steel_score} 分")
+        c4.metric("預估股息", f"{total_div:,.0f} 元")
 
     overnight = overnight_us_market_context()
     market_rev_df, reversal_score, reversal_light, reversal_advice = market_reversal_dashboard(ai_score, steel_score)
@@ -3745,6 +3759,10 @@ with tab_ai:
         st.info("目前資料不足，無法產生AI診斷。")
 
 with tab_portfolio:
+    if public_mode:
+        st.info("公開版不顯示持股、成本、投入資金、損益、報酬率、股息與配置建議。")
+        st.stop()
+
     st.caption(data_update_status())
     st.subheader("💰 持股追蹤")
 
