@@ -12,7 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Hsing 投資儀表板 V11.2a Table Display Fix Edition", layout="wide")
+st.set_page_config(page_title="Hsing 投資儀表板", page_icon="📈", layout="wide")
 
 PORTFOLIO_FILE = "portfolio.csv"
 BROKER_FEE_RATE = 0.001425
@@ -23,7 +23,6 @@ stock_list = {
     "鴻海": "2317.TW",
     "廣達": "2382.TW",
     "大成鋼": "2027.TW",
-    "中鋼": "2002.TW",
 }
 
 stock_id_map = {
@@ -31,7 +30,6 @@ stock_id_map = {
     "鴻海": "2317",
     "廣達": "2382",
     "大成鋼": "2027",
-    "中鋼": "2002",
 }
 
 ai_market_list = {
@@ -56,7 +54,6 @@ default_portfolio = {
     "鴻海": {"shares": 200, "cost": 264.72},
     "廣達": {"shares": 500, "cost": 315.49},
     "大成鋼": {"shares": 1000, "cost": 42.69},
-    "中鋼": {"shares": 1000, "cost": 19.02},
 }
 
 long_term_rules = {
@@ -64,7 +61,6 @@ long_term_rules = {
     "廣達": {"add": 320, "strong_add": 300, "reduce": 380, "type": "AI"},
     "鴻海": {"add": 280, "strong_add": 260, "reduce": 320, "type": "AI"},
     "大成鋼": {"add": 40, "strong_add": 38, "reduce": 48, "type": "STEEL"},
-    "中鋼": {"add": 18.5, "strong_add": 17, "reduce": 22, "type": "STEEL"},
 }
 
 news_targets = {
@@ -72,145 +68,283 @@ news_targets = {
     "輝達": {"ticker": "NVDA", "keyword": "NVIDIA 輝達 AI GPU"},
     "廣達": {"ticker": "2382.TW", "keyword": "廣達 2382 AI伺服器"},
     "鴻海": {"ticker": "2317.TW", "keyword": "鴻海 2317 AI伺服器"},
-    "中鋼": {"ticker": "2002.TW", "keyword": "中鋼 2002 鋼價"},
     "大成鋼": {"ticker": "2027.TW", "keyword": "大成鋼 2027 鋼鋁 關稅"},
 }
 
 st.markdown("""
 <style>
-html, body, [class*="css"] { font-size: 22px; }
-.block-container { padding-top: 1.2rem; padding-left: 1.2rem; padding-right: 1.2rem; max-width: 98% !important; }
-h1 { font-size: 38px !important; font-weight: 900 !important; margin-top: 16px !important; line-height: 1.3 !important; }
-h2, h3 { font-size: 30px !important; font-weight: 900 !important; }
-
-table, th, td {
-    font-size: 18px !important;
+:root {
+    --bg: #f6f8fb;
+    --panel: #ffffff;
+    --panel-soft: #f8fafc;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --accent: #2563eb;
+    --accent-soft: #dbeafe;
+    --up: #dc2626;
+    --down: #059669;
+    --flat: #64748b;
 }
 
-[data-testid="stMetricValue"] {
-    font-size: 32px !important;
-    font-weight: 900 !important;
+html, body, [class*="css"] {
+    font-size: 16px;
+    color: var(--ink);
+    background: var(--bg);
 }
 
-[data-testid="stDataFrame"] {
-    font-size: 18px !important;
+[data-testid="stAppViewContainer"] > .main {
+    padding-top: 0.75rem !important;
+}
+.block-container {
+    max-width: 1500px !important;
+    padding: 2.6rem 1.4rem 2.4rem !important;
 }
 
-/* V10.9 顯示修正：避免表格文字被切太多 */
-[data-testid="stDataFrame"] div[role="gridcell"],
-[data-testid="stDataFrame"] div[role="columnheader"] {
-    font-size: 18px !important;
+h1, h2, h3 {
+    color: var(--ink) !important;
+    letter-spacing: 0 !important;
 }
 
-.red-text { color:#ff3333; font-weight:900; }
-.green-text { color:#00bb44; font-weight:900; }
-.gray-text { color:gray; font-weight:900; }
-.big-profit { font-size:32px; font-weight:900; }
-
-.market-card {
-    background:#111827;
-    border-radius:15px;
-    padding:15px;
-    text-align:center;
-    min-height:130px;
-}
-.market-title { color:white; font-size:17px; }
-.market-value { color:white; font-size:28px; font-weight:bold; }
-.market-red { color:#ff3333; font-size:20px; font-weight:900; }
-.market-green { color:#00bb44; font-size:20px; font-weight:900; }
-.market-gray { color:gray; font-size:20px; font-weight:900; }
-
-.alert-card {
-    background:#0f172a;
-    border-left:6px solid #60a5fa;
-    color:white;
-    border-radius:12px;
-    padding:14px 18px;
-    margin:8px 0;
-    line-height:1.5;
-}
-
-.section-note { color:#94a3b8; font-size:16px; }
-
-/* V6.4a 顯示修正版 */
-[data-testid="stCaptionContainer"] {
-    border: none !important;
-    text-decoration: none !important;
+h1 {
+    font-size: 2rem !important;
+    font-weight: 850 !important;
+    line-height: 1.18 !important;
+    margin: 0 !important;
 }
 
 h2, h3 {
-    margin-top: 1.2rem !important;
-    margin-bottom: 0.9rem !important;
-}
-
-[data-testid="stDataFrame"] {
-    margin-top: 0.6rem !important;
+    font-size: 1.24rem !important;
+    font-weight: 800 !important;
+    margin: 1.2rem 0 0.65rem !important;
 }
 
 hr {
-    margin-top: 1.8rem !important;
-    margin-bottom: 1.8rem !important;
+    margin: 1.15rem 0 !important;
+    border-color: var(--line) !important;
 }
 
+[data-testid="stSidebar"] {
+    background: #0f172a;
+}
 
-/* V11.2a Table Display Fix Edition */
+[data-testid="stSidebar"] * {
+    color: #e5e7eb !important;
+}
+
+[data-testid="stSidebar"] input {
+    color: #111827 !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3 {
+    font-size: 0.98rem !important;
+    margin-top: 1rem !important;
+}
+
+[data-testid="stTabs"] [role="tablist"] {
+    gap: 0.35rem;
+    border-bottom: 1px solid var(--line);
+}
+
+[data-testid="stTabs"] [role="tab"] {
+    border-radius: 8px 8px 0 0;
+    padding: 0.55rem 0.8rem;
+    background: transparent;
+    color: var(--muted);
+    font-weight: 750;
+}
+
+[data-testid="stTabs"] [aria-selected="true"] {
+    background: var(--panel);
+    color: var(--accent) !important;
+    border-bottom: 3px solid var(--accent);
+}
+
+.app-hero {
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 58%, #0f766e 100%);
+    color: white;
+    border-radius: 8px;
+    padding: 1.8rem 1.45rem 1.35rem;
+    margin-top: 0.6rem;
+    margin-bottom: 0.9rem;
+    box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
+}
+
+.app-hero__eyebrow {
+    color: #bfdbfe;
+    font-size: 0.82rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    line-height: 1.35;
+    margin-bottom: 0.35rem;
+}
+
+.app-hero__title {
+    color: white !important;
+    font-size: clamp(1.75rem, 2.4vw, 2.55rem) !important;
+    line-height: 1.12 !important;
+    margin: 0 !important;
+}
+
+.app-hero__subtitle {
+    color: #dbeafe;
+    max-width: 760px;
+    font-size: 0.98rem;
+    margin-top: 0.45rem;
+}
+
+[data-testid="stMetric"] {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+    box-shadow: 0 7px 18px rgba(15, 23, 42, 0.055);
+}
+
+[data-testid="stMetricLabel"] p {
+    color: var(--muted) !important;
+    font-size: 0.86rem !important;
+    font-weight: 750 !important;
+}
+
+[data-testid="stMetricValue"] {
+    color: var(--ink) !important;
+    font-size: 1.65rem !important;
+    font-weight: 850 !important;
+}
+
+[data-testid="stMetricDelta"] {
+    font-weight: 800 !important;
+}
+
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 7px 18px rgba(15, 23, 42, 0.045);
+    margin-top: 0.55rem !important;
+}
+
+[data-testid="stDataFrame"] div[role="gridcell"],
+[data-testid="stDataFrame"] div[role="columnheader"] {
+    font-size: 0.92rem !important;
+}
+
+button[kind="primary"], .stButton > button {
+    border-radius: 8px !important;
+    font-weight: 800 !important;
+    border: 1px solid var(--line) !important;
+}
+
+.red-text { color: var(--up); font-weight: 850; }
+.green-text { color: var(--down); font-weight: 850; }
+.gray-text { color: var(--flat); font-weight: 850; }
+.big-profit { font-size: 1.8rem; font-weight: 900; }
+
+.market-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.9rem 0.8rem;
+    text-align: left;
+    min-height: 116px;
+    box-shadow: 0 7px 18px rgba(15, 23, 42, 0.05);
+}
+.market-title { color: var(--muted); font-size: 0.84rem; font-weight: 800; }
+.market-value { color: var(--ink); font-size: 1.45rem; font-weight: 900; margin-top: 0.35rem; }
+.market-red { color: var(--up); font-size: 0.98rem; font-weight: 850; margin-top: 0.25rem; }
+.market-green { color: var(--down); font-size: 0.98rem; font-weight: 850; margin-top: 0.25rem; }
+.market-gray { color: var(--flat); font-size: 0.98rem; font-weight: 850; margin-top: 0.25rem; }
+
+.alert-card {
+    background: #0f172a;
+    border-left: 5px solid #38bdf8;
+    color: white;
+    border-radius: 8px;
+    padding: 0.95rem 1.05rem;
+    margin: 0.65rem 0;
+    line-height: 1.55;
+}
+
+.section-note { color: var(--muted); font-size: 0.9rem; }
+
+[data-testid="stCaptionContainer"] {
+    border: none !important;
+    text-decoration: none !important;
+    color: var(--muted) !important;
+}
+
 .wrapped-table-card {
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 16px;
-    padding: 10px 12px;
-    margin: 12px 0 22px 0;
-    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin: 0.65rem 0 1.15rem;
+    box-shadow: 0 7px 18px rgba(15, 23, 42, 0.045);
     overflow-x: auto;
+    overscroll-behavior-x: contain;
 }
 .wrapped-table {
-    width: 100%;
+    width: max-content;
     border-collapse: collapse;
     table-layout: fixed;
 }
 .wrapped-table th {
-    background: #f8fafc;
-    color: #64748b;
-    font-size: 17px;
-    font-weight: 800;
-    padding: 12px 10px;
-    border-bottom: 1px solid #e5e7eb;
+    background: var(--panel-soft);
+    color: var(--muted);
+    font-size: 0.84rem;
+    font-weight: 850;
+    padding: 0.58rem 0.72rem;
+    border-bottom: 1px solid var(--line);
     text-align: left;
     white-space: normal;
     word-break: keep-all;
+    overflow-wrap: normal;
 }
 .wrapped-table td {
-    color: #111827;
-    font-size: 17px;
-    line-height: 1.55;
-    padding: 12px 10px;
-    border-bottom: 1px solid #eef2f7;
+    color: var(--ink);
+    font-size: 0.9rem;
+    line-height: 1.36;
+    padding: 0.6rem 0.72rem;
+    border-bottom: 1px solid #edf2f7;
     vertical-align: top;
+    word-break: keep-all;
+    overflow-wrap: normal;
+}
+.wrapped-table td.cell-compact {
+    white-space: nowrap;
+}
+.wrapped-table td.cell-text {
     white-space: normal;
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    word-break: normal;
+    overflow-wrap: break-word;
 }
-.wrapped-table tr:last-child td {
-    border-bottom: none;
-}
-.wrapped-table tr:hover td {
-    background: #f9fafb;
-}
+.wrapped-table tr:last-child td { border-bottom: none; }
+.wrapped-table tbody tr:hover td { background: #f8fafc; }
 .section-card {
-    background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
-    border: 1px solid #e5e7eb;
-    border-radius: 18px;
-    padding: 18px 20px;
-    margin: 18px 0;
-    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+    background: transparent;
+    border: 0;
+    border-left: 4px solid var(--accent);
+    border-radius: 0;
+    padding: 0.25rem 0 0.25rem 0.8rem;
+    margin: 1rem 0 0.65rem;
+    box-shadow: none;
 }
 .section-subtle {
-    color: #64748b;
-    font-size: 16px;
-    margin-top: -4px;
-    margin-bottom: 10px;
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin-top: 0.15rem;
 }
 
+@media (max-width: 900px) {
+    [data-testid="stAppViewContainer"] > .main {
+    padding-top: 0.75rem !important;
+}
+.block-container { padding: 2rem 0.85rem 1.8rem !important; }
+    .app-hero { padding: 1.45rem 1rem 1.15rem; margin-top: 0.5rem; }
+    [data-testid="stMetricValue"] { font-size: 1.35rem !important; }
+    .wrapped-table { min-width: 760px; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -218,7 +352,7 @@ hr {
 
 
 def render_wrapped_table(df, column_widths=None, max_rows=None):
-    """顯示可讀表格：保留換行，但避免數字/文字被切成直排。"""
+    """顯示金融資訊表格：短欄不斷行，長說明欄才換行，避免數字直排。"""
     if df is None or df.empty:
         st.info("目前沒有資料。")
         return
@@ -228,7 +362,25 @@ def render_wrapped_table(df, column_widths=None, max_rows=None):
         if max_rows is not None:
             show_df = show_df.head(max_rows)
 
-        # V11.2a：不再使用百分比固定欄寬，避免畫面太窄時文字直排。
+        text_keywords = ["建議", "理由", "訊息", "狀態", "劇本", "條件", "風險", "傾向", "判斷"]
+        wide_keywords = ["建議", "理由", "訊息", "動作"]
+
+        col_defs = []
+        table_min_width = 0
+        for col in show_df.columns:
+            col_name = str(col)
+            width = column_widths.get(col) if column_widths else None
+            min_width = 190 if any(k in col_name for k in wide_keywords) else 115
+            if col_name in ["股票", "現價", "AI總分", "技術面", "籌碼面", "產業面"]:
+                min_width = 95
+            table_min_width += min_width
+            style = f"min-width:{min_width}px;"
+            if width:
+                style += f"width:{html.escape(str(width))};"
+            col_defs.append(f'<col style="{style}">')
+        colgroup = "<colgroup>" + "".join(col_defs) + "</colgroup>"
+
+        min_table_width = max(980, table_min_width)
         header = "".join(f"<th>{html.escape(str(col))}</th>" for col in show_df.columns)
         body_rows = []
 
@@ -238,13 +390,14 @@ def render_wrapped_table(df, column_widths=None, max_rows=None):
                 value = row[col]
                 if pd.isna(value):
                     value = ""
-                text_value = html.escape(str(value))
-                cells.append(f"<td>{text_value}</td>")
+                cell_class = "cell-text" if any(k in str(col) for k in text_keywords) else "cell-compact"
+                cells.append(f'<td class="{cell_class}">{html.escape(str(value))}</td>')
             body_rows.append("<tr>" + "".join(cells) + "</tr>")
 
         table_html = f"""
         <div class="wrapped-table-card">
-            <table class="wrapped-table">
+            <table class="wrapped-table" style="min-width:{min_table_width}px;">
+                {colgroup}
                 <thead><tr>{header}</tr></thead>
                 <tbody>{''.join(body_rows)}</tbody>
             </table>
@@ -254,11 +407,26 @@ def render_wrapped_table(df, column_widths=None, max_rows=None):
     except Exception:
         st.dataframe(show_df, use_container_width=True, hide_index=True)
 
-
 def render_section_title(title, note=None):
-    st.markdown(f'<div class="section-card"><h3>{html.escape(title)}</h3>' + (f'<div class="section-subtle">{html.escape(note)}</div>' if note else '') + '</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="section-card"><h3>{html.escape(title)}</h3>'
+        + (f'<div class="section-subtle">{html.escape(note)}</div>' if note else '')
+        + '</div>',
+        unsafe_allow_html=True,
+    )
 
 
+def render_app_header():
+    st.markdown(
+        """
+        <div class="app-hero">
+            <div class="app-hero__eyebrow">Portfolio Command Center</div>
+            <h1 class="app-hero__title">Hsing 投資儀表板</h1>
+            <div class="app-hero__subtitle">集中追蹤台股持倉、AI/鋼鐵族群溫度、法人籌碼、新聞與加減碼決策。</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 def ticker_to_twse_id(ticker):
     if isinstance(ticker, str) and ticker.endswith(".TW"):
@@ -580,12 +748,12 @@ def ai_temperature_comment(score):
 
 def steel_temperature_comment(score):
     if score >= 75:
-        return "🟢 原物料偏強，中鋼與大成鋼可觀察反彈。"
+        return "🟢 原物料偏強，大成鋼可觀察反彈。"
     if score >= 55:
         return "🔵 原物料中性偏多，續抱觀察。"
     if score >= 40:
         return "🟡 原物料中性偏弱，鋼鐵股暫不急著加碼。"
-    return "🔴 原物料偏弱，中鋼與大成鋼先保守。"
+    return "🔴 原物料偏弱，大成鋼先保守。"
 
 
 def risk_distance_from_ma(df):
@@ -908,6 +1076,159 @@ def adr_prediction_text():
     }
 
 
+
+def overnight_us_market_context():
+    """隔夜美股情境：判斷台股隔日開盤壓力與風險偏好。"""
+    checks = [
+        {"名稱": "台積電ADR", "ticker": "TSM", "方向": "up", "權重": 3},
+        {"名稱": "費城半導體", "ticker": "^SOX", "方向": "up", "權重": 3},
+        {"名稱": "輝達", "ticker": "NVDA", "方向": "up", "權重": 2},
+        {"名稱": "NASDAQ", "ticker": "^IXIC", "方向": "up", "權重": 2},
+        {"名稱": "VIX", "ticker": "^VIX", "方向": "down", "權重": 2},
+        {"名稱": "美債10Y", "ticker": "^TNX", "方向": "down", "權重": 1},
+        {"名稱": "美元指數", "ticker": "DX-Y.NYB", "方向": "down", "權重": 1},
+    ]
+
+    score = 0
+    details = []
+    rows = []
+    for item in checks:
+        latest, pct = get_latest_pct(item["ticker"])
+        if pct is None:
+            contribution = 0
+            signal = "⚪ 無資料"
+        else:
+            bullish = pct > 0 if item["方向"] == "up" else pct < 0
+            magnitude = 2 if abs(pct) >= 1.5 else 1
+            contribution = item["權重"] * magnitude * (1 if bullish else -1)
+            signal = "🟢 有利台股" if bullish else "🔴 壓力增加"
+            details.append(f"{item['名稱']} {pct:+.2f}%")
+        score += contribution
+        rows.append({"指標": item["名稱"], "變化": pct_label(pct), "判讀": signal, "影響分數": contribution})
+
+    if score >= 8:
+        scenario = "🟢 美股強勢，台股偏多開出"
+        tw_reaction = "AI與電子權值股較有機會帶動指數；但若開高過多，長線不追價。"
+    elif score >= 3:
+        scenario = "🔵 美股偏多，台股有撐"
+        tw_reaction = "台股大多偏震盪向上，觀察台積電與AI供應鏈能否守住開盤低點。"
+    elif score <= -8:
+        scenario = "🔴 美股明顯下跌，台股開低壓力大"
+        tw_reaction = "AI與半導體持股短線承壓；長線先看支撐，開盤急跌不急著砍，跌破支撐才控管部位。"
+    elif score <= -3:
+        scenario = "🟠 美股偏弱，台股可能震盪開低"
+        tw_reaction = "隔日先保守，停止追價；強勢股回測支撐不破才考慮小量分批。"
+    else:
+        scenario = "🟡 美股中性，台股看個股表現"
+        tw_reaction = "以個股支撐、法人籌碼與量價結構為主，不預設大方向。"
+
+    return {"score": int(score), "scenario": scenario, "tw_reaction": tw_reaction, "details": "｜".join(details) if details else "資料不足", "rows": pd.DataFrame(rows)}
+
+
+def stock_us_sensitivity(stock_name):
+    rule = long_term_rules.get(stock_name, {})
+    if stock_name == "台積電":
+        return "高", "台積電ADR與費半會直接影響開盤情緒"
+    if rule.get("type") == "AI":
+        return "高", "AI供應鏈對NASDAQ、費半、輝達敏感"
+    return "中", "鋼鐵股較受原物料與景氣循環影響，美股科技跌幅是間接壓力"
+
+
+def long_term_trade_decision(stock_name, current, df, portfolio, ai_score, steel_score, chip_score_map, overnight_score):
+    """長線1年買賣邏輯：隔夜美股只調整節奏，不單獨決定砍倉。"""
+    health = get_unified_score_value(stock_name, stock_list[stock_name], df, ai_score, steel_score, chip_score_map)
+    chip_score = float(chip_score_map.get(stock_name, 0))
+    trend_score, _trend_detail = get_trend_score_details(df, chip_score)
+    strong_hold = is_strong_trend_hold(stock_name, df, current, health, chip_score)
+    plan = smart_trade_plan(stock_name, current, portfolio, strong_hold)
+    rule = long_term_rules.get(stock_name, {})
+    add_price = float(rule.get("add", current))
+    strong_add = float(rule.get("strong_add", add_price))
+    reduce_price = float(rule.get("reduce", current))
+    support, resistance = calc_support_resistance(df)
+    ma20 = float(df["Close"].rolling(20).mean().iloc[-1]) if len(df) >= 20 else current
+    ma60 = float(df["Close"].rolling(60).mean().iloc[-1]) if len(df) >= 60 else ma20
+    held_shares = int(portfolio.get(stock_name, {}).get("shares", 0)) if portfolio else 0
+    cash_available = float(globals().get("cash_input", 30000))
+    sensitivity, sensitivity_note = stock_us_sensitivity(stock_name)
+
+    near_support = current <= support * 1.03 if support else False
+    below_support = current < support * 0.99 if support else False
+    trend_break = current < ma20 and trend_score < 45
+    chip_weak = chip_score < 0
+    high_zone = current >= reduce_price
+    add_zone = current <= add_price
+    strong_add_zone = current <= strong_add
+
+    if overnight_score <= -8 and sensitivity == "高":
+        overnight_impact = "🔴 高衝擊：美股重挫時，隔日AI/電子容易開低測支撐"
+    elif overnight_score <= -3:
+        overnight_impact = "🟠 中衝擊：先看開盤30-60分鐘是否守住支撐"
+    elif overnight_score >= 5:
+        overnight_impact = "🟢 正向：有利續抱，但開高不追價"
+    else:
+        overnight_impact = "🟡 中性：回到個股技術與籌碼判斷"
+
+    if health >= 70 and not trend_break:
+        long_bias = "長線偏多：以1年續抱為主，拉回分批，不追高。"
+    elif health >= 55:
+        long_bias = "長線中性偏多：續抱觀察，等支撐與籌碼確認再加碼。"
+    elif health >= 45:
+        long_bias = "長線轉弱觀察：降低加碼頻率，先守現金。"
+    else:
+        long_bias = "長線偏弱：禁止加碼，反彈優先降風險。"
+
+    add_budget = cash_available * (0.25 if strong_add_zone else 0.15)
+    add_shares = int(add_budget // current) if current > 0 else 0
+    reduce_ratio = 0.25 if (health < 45 and trend_break) else 0.15
+    reduce_shares = max(1, int(held_shares * reduce_ratio)) if held_shares else 0
+
+    if health < 50:
+        add_advice = "🔴 不加碼：AI總分低於50，等分數修復。"
+    elif overnight_score <= -8 and sensitivity == "高" and not near_support:
+        add_advice = "🟠 暫緩：美股重挫且尚未到支撐，等開盤急跌後確認。"
+    elif below_support:
+        add_advice = "🔴 不接刀：跌破支撐，等重新站回支撐再評估。"
+    elif strong_add_zone and health >= 65 and chip_score >= 0:
+        add_advice = f"🟢 強力分批：可用約25%本月資金，估 {add_shares} 股，分2-3筆。"
+    elif add_zone and health >= 60 and chip_score >= 0:
+        add_advice = f"🟢 分批加碼：可用約15%本月資金，估 {add_shares} 股。"
+    elif near_support and health >= 65 and overnight_score <= -3:
+        add_advice = f"🔵 開低測支撐策略：不追開盤，若30-60分鐘守住支撐，可小量 {max(1, add_shares)} 股。"
+    else:
+        add_advice = "🟡 暫不加碼：等回到加碼區或反轉指標轉強。"
+
+    if not held_shares:
+        reduce_advice = "無持股可減碼。"
+    elif strong_hold and health >= 65:
+        reduce_advice = "🚀 不減碼：強勢股長線續抱，但不追高。"
+    elif below_support and trend_break and chip_weak:
+        reduce_advice = f"🔴 風險減碼：跌破支撐且趨勢/籌碼轉弱，可先降 {reduce_shares} 股。"
+    elif high_zone and trend_score < 50 and chip_weak:
+        reduce_advice = f"🟠 高檔轉弱：可分批減碼 {reduce_shares} 股，保留核心部位。"
+    elif overnight_score <= -8 and sensitivity == "高" and trend_break:
+        reduce_advice = f"🟠 美股重挫+趨勢轉弱：若開盤反彈無力，可減碼 {reduce_shares} 股。"
+    else:
+        reduce_advice = "暫不減碼：未跌破長線條件，維持核心部位。"
+
+    triggers = [
+        f"支撐 {support:.2f} / 壓力 {resistance:.2f}",
+        f"MA20 {ma20:.2f} / MA60 {ma60:.2f}",
+        f"趨勢分數 {trend_score} / 法人籌碼 {chip_score:+.1f}",
+    ]
+
+    return {
+        "AI總分": health,
+        "趨勢分數": trend_score,
+        "隔夜影響": overnight_impact,
+        "美股敏感度": f"{sensitivity}｜{sensitivity_note}",
+        "1年策略": long_bias,
+        "加碼建議": add_advice,
+        "減碼建議": reduce_advice,
+        "位置狀態": plan["位置狀態"],
+        "觸發條件": "｜".join(triggers),
+    }
+
 def add_reduce_light(stock_name, current_price, score, risk_text):
     rule = long_term_rules[stock_name]
 
@@ -1051,9 +1372,9 @@ def generate_alerts(ai_score, steel_score, chip_score_map):
         alerts.append("⚠️ AI市場溫度偏弱，AI族群短線需保守，等拉回再分批。")
 
     if steel_score >= 75:
-        alerts.append("🔥 鋼鐵原物料偏強，有利中鋼、大成鋼反彈。")
+        alerts.append("🔥 鋼鐵原物料偏強，有利大成鋼反彈。")
     elif steel_score <= 40:
-        alerts.append("⚠️ 鋼鐵原物料偏弱，中鋼、大成鋼暫時保守。")
+        alerts.append("⚠️ 鋼鐵原物料偏弱，大成鋼暫時保守。")
 
     return alerts
 
@@ -1326,7 +1647,6 @@ def dividend_yield_estimate(stock_name, current_price):
         "鴻海": 5.8,
         "廣達": 9.0,
         "大成鋼": 1.0,
-        "中鋼": 0.35,
     }
 
     dividend = dividend_map.get(stock_name, 0)
@@ -1497,7 +1817,6 @@ def dividend_rows(portfolio):
         "鴻海": 5.8,
         "廣達": 9.0,
         "大成鋼": 1.0,
-        "中鋼": 0.35,
     }
 
     total_dividend = 0
@@ -1779,8 +2098,10 @@ def v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map):
 
 
 def v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_score_map):
-    """產生 V10 買賣計畫中心表格。"""
+    """產生長線1年買賣計畫表：納入隔夜美股衝擊、支撐、籌碼與部位。"""
     rows = []
+    overnight = overnight_us_market_context()
+    overnight_score = overnight["score"]
 
     for stock_name, ticker in stock_list.items():
         df = get_data(ticker, "1y")
@@ -1818,23 +2139,33 @@ def v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_scor
         else:
             long_term_action = "🔴 禁止加碼"
 
+        long_decision = long_term_trade_decision(
+            stock_name,
+            current,
+            df,
+            portfolio,
+            ai_score,
+            steel_score,
+            chip_score_map,
+            overnight_score,
+        )
+
         rows.append({
             "股票": stock_name,
-            "AI總分": health,
-            "長線建議": long_term_action,
             "現價": round(current, 2),
+            "AI總分": health,
+            "1年策略": long_decision["1年策略"],
+            "美股敏感度": long_decision["美股敏感度"],
+            "隔夜影響": long_decision["隔夜影響"],
             "AI燈號": signal,
             "加碼區": plan["加碼區"],
             "距加碼": f"{dist_add:+.1f}%",
-            "建議加碼": (
-                "🔴 禁止加碼(總分過低)"
-                if health < 50
-                else (plan["建議股數"] if "加碼" in plan["建議股數"] else "暫不加碼")
-            ),
+            "加碼建議": long_decision["加碼建議"],
             "減碼區": plan["減碼區"],
             "距減碼": f"{dist_reduce:+.1f}%",
-            "建議減碼": "暫不減碼，強勢續抱" if strong_hold else (plan["建議股數"] if ("減碼" in plan["建議股數"] and "轉弱" in reason) else "暫不減碼"),
-            "位置狀態": plan["位置狀態"],
+            "減碼建議": long_decision["減碼建議"],
+            "位置狀態": long_decision["位置狀態"],
+            "觸發條件": long_decision["觸發條件"],
             "理由": reason,
         })
 
@@ -2305,7 +2636,6 @@ def allocation_suggestion(cash, ai_score, steel_score):
         "廣達": 0.25,
         "鴻海": 0.20,
         "大成鋼": 0.05,
-        "中鋼": 0.05,
     }
 
     if ai_score >= 80:
@@ -2313,17 +2643,14 @@ def allocation_suggestion(cash, ai_score, steel_score):
         weights["廣達"] += 0.03
         weights["鴻海"] += 0.02
         weights["大成鋼"] -= 0.05
-        weights["中鋼"] -= 0.05
     elif ai_score <= 40:
         weights["台積電"] -= 0.05
         weights["廣達"] -= 0.03
         weights["鴻海"] -= 0.02
         weights["大成鋼"] += 0.05
-        weights["中鋼"] += 0.05
 
     if steel_score >= 75:
         weights["大成鋼"] += 0.05
-        weights["中鋼"] += 0.05
         weights["台積電"] -= 0.05
         weights["廣達"] -= 0.03
         weights["鴻海"] -= 0.02
@@ -2431,6 +2758,41 @@ def tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map):
 
         score_detail = calc_unified_ai_score(stock_name, ticker, df, ai_score, steel_score, chip_score_map)
 
+        first_support = round(max(float(support), float(ma20) * 0.995), 2)
+        defense_price = round(min(float(support), float(ma20)) * 0.985, 2)
+        breakout_price = round(max(float(resistance), current * 1.015), 2)
+        pullback_buy_price = round(max(float(add_price), first_support), 2)
+        take_profit_watch = round(min(float(reduce_price), breakout_price), 2)
+
+        open_high_plan = (
+            f"開高站穩 {breakout_price:.2f} 且量能放大，續抱；若急拉到 {take_profit_watch:.2f} 附近不追價。"
+        )
+        range_plan = (
+            f"在 {first_support:.2f}~{breakout_price:.2f} 震盪，靠近支撐才觀察，盤中追高不做。"
+        )
+        open_low_plan = (
+            f"開低先看 {first_support:.2f} 是否守住；跌破 {defense_price:.2f} 轉防守。"
+        )
+
+        if health < 50:
+            intraday_strategy = f"不加碼。反彈觀察 {first_support:.2f} 能否站回；跌破 {defense_price:.2f} 控管風險。"
+        elif current <= add_price and health >= 65:
+            intraday_strategy = f"可分批。回測 {pullback_buy_price:.2f} 不破、KD/MACD未轉弱時小量加碼。"
+        elif 0 <= dist_reduce <= 5 and not strong_hold:
+            intraday_strategy = f"靠近減碼區。若無法突破 {breakout_price:.2f} 且跌破 {first_support:.2f}，考慮小幅減碼。"
+        elif strong_hold:
+            intraday_strategy = f"強勢續抱。突破 {breakout_price:.2f} 續看，跌破 {first_support:.2f} 才降速觀察。"
+        else:
+            intraday_strategy = f"續抱等待。有效站上 {breakout_price:.2f} 才轉強；回測 {pullback_buy_price:.2f} 才評估加碼。"
+
+        key_prices = (
+            f"支撐 {first_support:.2f}｜防守 {defense_price:.2f}｜突破 {breakout_price:.2f}｜"
+            f"加碼 {add_price:.2f}｜減碼 {reduce_price:.2f}"
+        )
+        strategy_summary = (
+            f"守 {first_support:.2f} 續抱；破 {defense_price:.2f} 防守；站上 {breakout_price:.2f} 轉強。"
+        )
+
         rows.append({
             "股票": stock_name,
             "現價": round(current, 2),
@@ -2439,20 +2801,177 @@ def tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map):
             "籌碼面": f"{score_detail['chip_part']}/30",
             "產業面": f"{score_detail['industry_part']}/30",
             "明日傾向": bias,
+            "可能走勢劇本": main,
+            "開高劇本": open_high_plan,
+            "震盪劇本": range_plan,
+            "開低劇本": open_low_plan,
             "主要劇本": main,
             "偏多條件": bullish,
             "震盪區間": neutral,
             "偏弱風險": bearish,
-            "支撐": support,
-            "壓力": resistance,
+            "支撐": first_support,
+            "壓力": breakout_price,
+            "防守價": defense_price,
+            "突破價": breakout_price,
             "加碼價": add_price,
             "減碼價": reduce_price,
+            "關鍵價格": key_prices,
+            "當日買賣策略": intraday_strategy,
             "建議動作": action,
         })
 
     return pd.DataFrame(rows)
 
 
+
+
+def pct_label(pct):
+    if pct is None:
+        return "N/A"
+    return f"{pct:+.2f}%"
+
+
+def market_reversal_dashboard(ai_score, steel_score):
+    """股市反轉先行指標：用風險因子、領先股與產業溫度判斷大盤風向。"""
+    indicators = [
+        {"指標": "NASDAQ", "ticker": "^IXIC", "多方條件": "上漲", "weight": 10, "note": "科技股風險偏好"},
+        {"指標": "費城半導體", "ticker": "^SOX", "多方條件": "上漲", "weight": 12, "note": "半導體領先族群"},
+        {"指標": "輝達 NVDA", "ticker": "NVDA", "多方條件": "上漲", "weight": 12, "note": "AI領先股"},
+        {"指標": "台積電 ADR", "ticker": "TSM", "多方條件": "上漲", "weight": 10, "note": "台股權值風向"},
+        {"指標": "VIX", "ticker": "^VIX", "多方條件": "下跌", "weight": 10, "note": "恐慌降溫"},
+        {"指標": "美債10年殖利率", "ticker": "^TNX", "多方條件": "下跌", "weight": 8, "note": "估值壓力下降"},
+        {"指標": "美元指數 DXY", "ticker": "DX-Y.NYB", "多方條件": "下跌", "weight": 6, "note": "資金回流風險資產"},
+    ]
+
+    score = 50
+    rows = []
+    bullish_count = 0
+
+    for item in indicators:
+        latest, pct = get_latest_pct(item["ticker"])
+        if pct is None:
+            status = "⚪ 資料不足"
+            contribution = 0
+        else:
+            bullish = pct > 0 if item["多方條件"] == "上漲" else pct < 0
+            contribution = item["weight"] if bullish else -item["weight"]
+            status = "🟢 多方反轉" if bullish else "🔴 風險未解除"
+            bullish_count += 1 if bullish else 0
+        score += contribution
+        rows.append({
+            "指標": item["指標"],
+            "最新": "N/A" if latest is None else round(float(latest), 2),
+            "變化": pct_label(pct),
+            "多方條件": item["多方條件"],
+            "判讀": status,
+            "權重影響": contribution,
+            "用途": item["note"],
+        })
+
+    if ai_score >= 65:
+        score += 8
+    elif ai_score <= 40:
+        score -= 8
+    if steel_score >= 60:
+        score += 4
+    elif steel_score <= 40:
+        score -= 4
+
+    score = int(max(0, min(100, score)))
+    if score >= 75 and bullish_count >= 5:
+        light = "🟢 反轉偏多"
+        advice = "可分批找回測支撐、法人轉買、KD/MACD同步改善的標的；避免追高一次買滿。"
+    elif score >= 60:
+        light = "🔵 止跌轉強"
+        advice = "市場風向開始改善，可建立觀察名單；加碼以接近支撐、分數轉強者優先。"
+    elif score >= 45:
+        light = "🟡 震盪築底"
+        advice = "尚未確認反轉，先降低交易頻率；等VIX/美債/半導體指標再同步改善。"
+    else:
+        light = "🔴 風險偏高"
+        advice = "暫緩加碼，保留現金；若個股跌破支撐且法人續賣，優先控管部位。"
+
+    return pd.DataFrame(rows), score, light, advice
+
+
+def stock_reversal_rows(portfolio, ai_score, steel_score, chip_score_map):
+    """個股反轉先行指標：結合支撐、均線、KD/MACD與法人籌碼。"""
+    rows = []
+    for stock_name, ticker in stock_list.items():
+        if stock_name not in portfolio:
+            continue
+
+        df = get_data(ticker, "6mo")
+        if df.empty or len(df) < 60:
+            continue
+
+        df = calculate_kd(df.copy())
+        df = calculate_macd(df.copy())
+        current = float(get_display_price(ticker, df))
+        prev_close = float(df.iloc[-2]["Close"]) if len(df) >= 2 else current
+        day_pct = (current - prev_close) / prev_close * 100 if prev_close else 0
+        ma5 = float(df["Close"].rolling(5).mean().iloc[-1])
+        ma20 = float(df["Close"].rolling(20).mean().iloc[-1])
+        ma60 = float(df["Close"].rolling(60).mean().iloc[-1])
+        support, resistance = calc_support_resistance(df)
+        k_now = float(df["K"].dropna().iloc[-1]) if df["K"].notna().sum() else 50
+        d_now = float(df["D"].dropna().iloc[-1]) if df["D"].notna().sum() else 50
+        hist_now = float(df["Hist"].dropna().iloc[-1]) if df["Hist"].notna().sum() else 0
+        hist_prev = float(df["Hist"].dropna().iloc[-2]) if df["Hist"].notna().sum() >= 2 else hist_now
+        chip_score = float(chip_score_map.get(stock_name, 0))
+        health = get_unified_score_value(stock_name, ticker, df, ai_score, steel_score, chip_score_map)
+
+        near_support = abs(current - support) / support * 100 <= 4 if support else False
+        reclaim_ma5 = current > ma5 and prev_close <= ma5
+        reclaim_ma20 = current > ma20 and prev_close <= ma20
+        kd_turn = k_now > d_now and k_now < 65
+        macd_turn = hist_now > hist_prev
+        chip_turn = chip_score >= 0
+
+        score = 45
+        score += 10 if current > ma5 else -5
+        score += 12 if current > ma20 else -8
+        score += 8 if ma20 >= ma60 else -6
+        score += 10 if kd_turn else -3
+        score += 10 if macd_turn else -4
+        score += 8 if chip_turn else -6
+        score += 7 if near_support else 0
+        score += 6 if reclaim_ma5 or reclaim_ma20 else 0
+        score += max(-8, min(8, chip_score * 2))
+        score = int(max(0, min(100, score)))
+
+        if score >= 75:
+            light = "🟢 反轉轉強"
+            advice = "可列優先觀察；回測不破支撐且量能放大，再分批加碼。"
+        elif score >= 60:
+            light = "🔵 初步止跌"
+            advice = "先小部位或續抱觀察，等站穩MA20或法人連買再加碼。"
+        elif score >= 45:
+            light = "🟡 尚未確認"
+            advice = "不追價，等KD/MACD與籌碼至少兩項同步轉強。"
+        else:
+            light = "🔴 轉弱防守"
+            advice = "暫緩加碼；若跌破支撐，優先保留現金或降低風險。"
+
+        rows.append({
+            "股票": stock_name,
+            "現價": round(current, 2),
+            "日漲跌": pct_label(day_pct),
+            "反轉分數": score,
+            "反轉燈號": light,
+            "支撐": support,
+            "壓力": resistance,
+            "MA20位置": "站上" if current > ma20 else "跌破",
+            "KD": f"K {k_now:.1f} / D {d_now:.1f}",
+            "MACD柱": "改善" if macd_turn else "轉弱",
+            "法人籌碼": "偏多" if chip_turn else "偏弱",
+            "AI總分": health,
+            "建議": advice,
+        })
+
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values(["反轉分數", "AI總分"], ascending=[False, False])
 
 def render_ai_score_explanation():
     """AI頁面：顯示 AI市場溫度 / AI領先指數 計算方式說明。"""
@@ -2525,10 +3044,11 @@ def render_ai_score_explanation():
 # 主畫面：V7.2 精簡版
 # =====================================================
 
-st.title("📈 Hsing 投資儀表板")
+render_app_header()
 
-st.caption(data_update_status())
-if st.button("🔄 強制更新價格資料", key="refresh_price_button_1"):
+status_col, refresh_col = st.columns([5, 1])
+status_col.caption(data_update_status())
+if refresh_col.button("🔄 更新", key="refresh_price_button_1", use_container_width=True):
     st.cache_data.clear()
     st.rerun()
 
@@ -2538,7 +3058,8 @@ if st.button("🔄 強制更新價格資料", key="refresh_price_button_1"):
 saved_portfolio = load_portfolio()
 
 with st.sidebar:
-    st.header("⚙️ 持股設定")
+    st.header("⚙️ 持股與資金設定")
+    st.caption("調整持股、成本與本月可投入資金。")
 
     fee_discount = st.number_input("元大手續費折扣", min_value=0.52, max_value=1.0, value=0.52, step=0.01)
     cash_input = st.number_input("本月可投入資金", min_value=0, value=30000, step=1000)
@@ -2588,20 +3109,21 @@ fg_score, fg_text = fear_greed_index(ai_score, steel_score)
 # 分頁細節：V11.2a Table Display Fix Edition
 # =====================================================
 
-tab_overview, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
-    "📊 投資總覽",
+tab_overview, tab_reversal, tab_scenario, tab_chart, tab_ai_market, tab_steel, tab_institution, tab_news, tab_ai, tab_portfolio = st.tabs([
+    "📊 總覽",
+    "🔁 反轉指標",
     "🔮 明日劇本",
-    "📈 K線中心",
-    "🤖 AI / 半導體市場",
-    "🏗️ 鋼鐵 / 原物料",
-    "🏦 法人中心",
-    "📰 新聞中心",
-    "🧠 AI診斷中心",
-    "💰 持股中心",
+    "📈 K線",
+    "🤖 AI市場",
+    "🏗️ 鋼鐵原物料",
+    "🏦 法人籌碼",
+    "📰 新聞",
+    "🧠 AI診斷",
+    "💰 持股",
 ])
 
 with tab_overview:
-    st.subheader("📊 投資總覽")
+    st.subheader("📊 今日總覽")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("恐慌貪婪", f"{fg_score} 分")
@@ -2609,7 +3131,10 @@ with tab_overview:
     c3.metric("鋼鐵溫度", f"{steel_score} 分")
     c4.metric("預估股息", f"{total_div:,.0f} 元")
 
-    st.info(fg_text)
+    overnight = overnight_us_market_context()
+    market_rev_df, reversal_score, reversal_light, reversal_advice = market_reversal_dashboard(ai_score, steel_score)
+    st.info(f"{fg_text}｜反轉指標：{reversal_light}（{reversal_score}分）。{reversal_advice}")
+    st.warning(f"🌙 隔夜美股：{overnight['scenario']}｜台股反應：{overnight['tw_reaction']}｜依據：{overnight['details']}")
 
     decision = v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map)
     if decision:
@@ -2619,106 +3144,88 @@ with tab_overview:
         best_add = decision["best_add"]
         forbidden = decision["forbidden"]
 
-        st.subheader("🎯 今日決策卡")
+        st.subheader("🎯 今日只看四件事")
         d1, d2, d3, d4 = st.columns(4)
-        d1.success(f"🏆 第一梯隊：{top_group_names}｜AI總分 {top_score}分")
-        d2.warning(f"⚠️ 最需注意：{caution['股票']}｜距減碼 {caution['距減碼%']}%")
+        d1.success(f"🏆 強勢：{top_group_names}｜{top_score}分")
+        d2.warning(f"⚠️ 留意：{caution['股票']}｜距減碼 {caution['距減碼%']}%")
         if best_add is not None:
-            d3.success(f"🟢 最佳加碼：{best_add['股票']}｜加碼價 {best_add['加碼價']}｜距加碼 {best_add['距加碼%']}%")
+            d3.success(f"🟢 加碼候選：{best_add['股票']}｜距加碼 {best_add['距加碼%']}%")
         else:
-            d3.info("🟢 最佳加碼：目前沒有")
+            d3.info("🟢 加碼候選：暫無")
         if forbidden is not None:
-            d4.error(f"🔴 禁止加碼：{forbidden['股票']}｜AI總分 {forbidden['AI總分']}分")
+            d4.error(f"🔴 禁止加碼：{forbidden['股票']}｜{forbidden['AI總分']}分")
         else:
-            d4.success("🔴 禁止加碼：目前沒有")
+            d4.success("🔴 禁止加碼：暫無")
 
+    overview_cols = st.columns([1, 1])
+    with overview_cols[0]:
+        st.subheader("🚨 重要預警")
+        if not alert_df.empty:
+            alert_cols = [c for c in ["等級", "股票", "訊息", "建議"] if c in alert_df.columns]
+            render_wrapped_table(alert_df[alert_cols].head(3), column_widths={"等級": "12%", "股票": "14%", "訊息": "44%", "建議": "30%"})
+        else:
+            st.success("目前沒有重大預警。")
 
-    st.markdown("---")
-    st.subheader("🔮 明日劇本摘要")
-    scenario_preview = tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map)
-    if not scenario_preview.empty:
-        scenario_cols = [c for c in ["股票", "明日傾向", "支撐", "壓力", "建議動作"] if c in scenario_preview.columns]
+    with overview_cols[1]:
+        st.subheader("🔮 明日摘要")
+        scenario_preview = tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map)
+        if not scenario_preview.empty:
+            scenario_cols = [c for c in ["股票", "明日傾向", "建議動作"] if c in scenario_preview.columns]
+            render_wrapped_table(scenario_preview[scenario_cols].head(5), column_widths={"股票": "18%", "明日傾向": "26%", "建議動作": "56%"})
+        else:
+            st.info("資料不足，暫無明日劇本。")
+
+    st.caption("完整買賣計畫放在「💰 持股」；反轉與止跌訊號放在「🔁 反轉指標」；技術細節放在「📈 K線」。")
+
+with tab_reversal:
+    st.subheader("🔁 股市反轉先行指標")
+    market_rev_df, reversal_score, reversal_light, reversal_advice = market_reversal_dashboard(ai_score, steel_score)
+
+    r1, r2, r3 = st.columns(3)
+    r1.metric("反轉分數", f"{reversal_score} 分")
+    r2.metric("市場燈號", reversal_light)
+    r3.metric("AI溫度", f"{ai_score} 分")
+    st.info(reversal_advice)
+
+    overnight = overnight_us_market_context()
+    st.subheader("🌙 隔夜美股情境")
+    st.warning(f"{overnight['scenario']}｜台股反應：{overnight['tw_reaction']}")
+    render_wrapped_table(
+        overnight["rows"],
+        column_widths={"指標": "30%", "變化": "18%", "判讀": "32%", "影響分數": "20%"},
+    )
+
+    st.subheader("🌐 市場層級")
+    render_wrapped_table(
+        market_rev_df,
+        column_widths={"指標": "16%", "最新": "10%", "變化": "10%", "多方條件": "12%", "判讀": "18%", "權重影響": "10%", "用途": "24%"},
+    )
+
+    st.subheader("📌 個股層級")
+    reversal_df = stock_reversal_rows(portfolio, ai_score, steel_score, chip_score_map)
+    if not reversal_df.empty:
         render_wrapped_table(
-            scenario_preview[scenario_cols],
+            reversal_df,
             column_widths={
-                "股票": "10%",
-                "明日傾向": "18%",
-                "支撐": "12%",
-                "壓力": "12%",
-                "建議動作": "48%",
-            },
-        )
-
-
-    st.markdown("---")
-    st.subheader("🚨 今日重要預警")
-    if not alert_df.empty:
-        alert_cols = [c for c in ["等級", "股票", "訊息", "加碼區", "減碼區", "位置狀態", "建議股數", "建議"] if c in alert_df.columns]
-        render_wrapped_table(
-            alert_df[alert_cols].head(5),
-            column_widths={
-                "等級": "11%",
                 "股票": "8%",
-                "訊息": "24%",
-                "加碼區": "11%",
-                "減碼區": "11%",
-                "位置狀態": "13%",
-                "建議股數": "11%",
-                "建議": "11%",
+                "現價": "8%",
+                "日漲跌": "8%",
+                "反轉分數": "8%",
+                "反轉燈號": "12%",
+                "支撐": "8%",
+                "壓力": "8%",
+                "MA20位置": "8%",
+                "KD": "12%",
+                "MACD柱": "8%",
+                "法人籌碼": "8%",
+                "AI總分": "8%",
+                "建議": "22%",
             },
         )
     else:
-        st.success("目前沒有重大預警。")
+        st.info("目前資料不足，無法產生個股反轉指標。")
 
-    st.markdown("---")
-    st.subheader("🚦 今日操作燈號")
-    if not summary_df.empty:
-        # 首頁只保留操作決策，買點/健康度/觀察重點留到 AI診斷中心與持股中心
-        keep_cols = [c for c in ["股票", "現價", "操作燈號", "加碼區", "減碼區", "位置狀態", "建議股數", "主要理由"] if c in summary_df.columns]
-        render_wrapped_table(
-            summary_df[keep_cols],
-            column_widths={
-                "股票": "8%",
-                "現價": "8%",
-                "操作燈號": "13%",
-                "加碼區": "13%",
-                "減碼區": "13%",
-                "位置狀態": "15%",
-                "建議股數": "15%",
-                "主要理由": "15%",
-            },
-        )
-
-    st.markdown("---")
-    st.subheader("🎯 V10 今日買賣計畫")
-    trade_plan_df = v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_score_map)
-    if not trade_plan_df.empty:
-        compact_cols = [c for c in ["股票", "現價", "AI燈號", "位置狀態", "建議加碼", "建議減碼"] if c in trade_plan_df.columns]
-        render_wrapped_table(
-            trade_plan_df[compact_cols],
-            column_widths={
-                "股票": "8%",
-                "現價": "8%",
-                "AI燈號": "14%",
-                "加碼區": "14%",
-                "建議加碼": "14%",
-                "減碼區": "14%",
-                "建議減碼": "14%",
-                "位置狀態": "14%",
-            },
-        )
-
-    st.subheader("🧭 投資組合風險")
-    risk_df, ai_pct, steel_pct, risk_label, risk_note = portfolio_risk_dashboard(portfolio)
-    r1, r2, r3 = st.columns(3)
-    r1.metric("AI族群占比", f"{ai_pct:.1f}%")
-    r2.metric("鋼鐵族群占比", f"{steel_pct:.1f}%")
-    r3.metric("配置風險", risk_label)
-    st.info(risk_note)
-
-
-    st.caption("持股明細請到「💰 持股中心」；健康度、買點與診斷細節請到「🧠 AI診斷中心」。")
-
+    st.caption("反轉指標是先行觀察，不是單一買賣訊號；建議搭配支撐壓力、部位大小與分批策略。")
 with tab_scenario:
     st.subheader("🔮 明日持股走勢可能劇本分析")
     st.caption("V11.2：本頁 AI總分已與 AI診斷中心統一，皆為 技術面40 + 籌碼面30 + 產業面30。")
@@ -2727,33 +3234,38 @@ with tab_scenario:
     scenario_df = tomorrow_scenario_rows(portfolio, ai_score, steel_score, chip_score_map)
 
     if not scenario_df.empty:
-        top_cols = [c for c in ["股票", "現價", "AI總分", "技術面", "籌碼面", "產業面", "明日傾向", "支撐", "壓力", "建議動作"] if c in scenario_df.columns]
+        top_cols = [c for c in ["股票", "現價", "AI總分", "明日傾向", "支撐", "壓力", "防守價", "突破價", "策略摘要"] if c in scenario_df.columns]
         render_wrapped_table(
             scenario_df[top_cols],
             column_widths={
                 "股票": "7%",
-                "現價": "7%",
-                "AI總分": "7%",
-                "技術面": "7%",
-                "籌碼面": "7%",
-                "產業面": "7%",
-                "明日傾向": "10%",
-                "支撐": "7%",
-                "壓力": "7%",
-                "加碼價": "7%",
-                "減碼價": "7%",
-                "建議動作": "20%",
+                "現價": "8%",
+                "AI總分": "8%",
+                "明日傾向": "13%",
+                "支撐": "8%",
+                "壓力": "8%",
+                "防守價": "8%",
+                "突破價": "8%",
+                "策略摘要": "32%",
             },
         )
 
         st.subheader("📋 個股劇本細節")
         for _, row in scenario_df.iterrows():
-            with st.expander(f"{row['股票']}｜{row['明日傾向']}｜現價 {row['現價']}"):
-                st.markdown(f"**主要劇本：** {row['主要劇本']}")
-                st.markdown(f"**偏多條件：** {row['偏多條件']}")
-                st.markdown(f"**震盪區間：** {row['震盪區間']}")
-                st.markdown(f"**偏弱風險：** {row['偏弱風險']}")
-                st.markdown(f"**建議動作：** {row['建議動作']}")
+            with st.expander(f"{row['股票']}｜{row['明日傾向']}｜現價 {row['現價']}｜支撐 {row['支撐']} / 壓力 {row['壓力']}"):
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("支撐", row["支撐"])
+                c2.metric("壓力/突破", row["突破價"])
+                c3.metric("防守價", row["防守價"])
+                c4.metric("AI總分", f"{row['AI總分']} 分")
+
+                st.markdown(f"**可能走勢劇本：** {row['可能走勢劇本']}")
+                st.markdown(f"**開高劇本：** {row['開高劇本']}")
+                st.markdown(f"**震盪劇本：** {row['震盪劇本']}")
+                st.markdown(f"**開低劇本：** {row['開低劇本']}")
+                st.markdown(f"**關鍵價格：** {row['關鍵價格']}")
+                st.markdown(f"**當日買賣策略：** {row['當日買賣策略']}")
+                st.markdown(f"**長線建議動作：** {row['建議動作']}")
     else:
         st.info("目前資料不足，無法產生明日劇本。")
 
@@ -3168,7 +3680,7 @@ with tab_ai:
     if not diagnosis_df.empty:
         st.dataframe(diagnosis_df, use_container_width=True, hide_index=True)
 
-        # V9.4a：AI診斷結論改為決策型，不再單純用總分第一名當「今日較強」
+        # AI診斷頁只保留診斷摘要，買賣決策集中在總覽與持股頁。
         df_decision = diagnosis_df.copy()
 
         def resonance_rank(text):
@@ -3191,60 +3703,25 @@ with tab_ai:
         df_decision["法人分數"] = df_decision["法人共振"].apply(resonance_rank)
         df_decision["燈號分數"] = df_decision["AI燈號"].apply(signal_rank)
 
-        # 今日最值得關注：總分高、法人轉強、但不是獲利觀察
         focus_df = df_decision[~df_decision["AI燈號"].astype(str).str.contains("減碼|停買|保守", na=False)].copy()
         if focus_df.empty:
             focus_df = df_decision.copy()
+        focus = focus_df.sort_values(["總分", "法人分數", "燈號分數"], ascending=[False, False, False]).iloc[0]
 
-        focus = focus_df.sort_values(
-            ["總分", "法人分數", "燈號分數"],
-            ascending=[False, False, False]
-        ).iloc[0]
-
-        # 最接近減碼：AI燈號已經出現獲利觀察
-        reduce_df = df_decision[df_decision["AI燈號"].astype(str).str.contains("減碼|停買", na=False)]
-        reduce_item = reduce_df.sort_values(["總分"], ascending=False).iloc[0] if not reduce_df.empty else None
-
-        # 最穩健：續抱且總分高，不含獲利觀察
         stable_df = df_decision[
             df_decision["AI燈號"].astype(str).str.contains("續抱", na=False)
             & ~df_decision["AI燈號"].astype(str).str.contains("減碼|停買", na=False)
         ]
         stable = stable_df.sort_values(["總分", "法人分數"], ascending=[False, False]).iloc[0] if not stable_df.empty else focus
-
         weak = df_decision.sort_values("總分", ascending=True).iloc[0]
 
-        decision = v102_decision_cards(portfolio, ai_score, steel_score, chip_score_map)
+        st.subheader("📌 診斷摘要")
+        a1, a2, a3 = st.columns(3)
+        a1.success(f"優先追蹤：{focus['股票']}｜{focus['總分']}分｜{focus['法人共振']}")
+        a2.info(f"穩健續抱：{stable['股票']}｜{stable['總分']}分｜{stable['趨勢狀態']}")
+        a3.warning(f"防守觀察：{weak['股票']}｜{weak['總分']}分｜{weak['AI燈號']}")
 
-        if decision:
-            top_group_names = decision["top_group_names"]
-            top_score = decision["top_score"]
-            caution = decision["caution"]
-            best_add = decision["best_add"]
-            forbidden = decision["forbidden"]
-
-            c1, c2 = st.columns(2)
-            c1.success(
-                f"🏆 第一梯隊：{top_group_names}｜AI總分 {top_score}分"
-            )
-            c2.warning(
-                f"⚠️ 最需注意：{caution['股票']}｜現價 {caution['現價']}｜距減碼 {caution['距減碼%']}%｜{caution['動作']}"
-            )
-
-            c3, c4 = st.columns(2)
-            if best_add is not None:
-                c3.success(
-                    f"🟢 最佳加碼機會：{best_add['股票']}｜現價 {best_add['現價']}｜加碼價 {best_add['加碼價']}｜距加碼 {best_add['距加碼%']}%"
-                )
-            else:
-                c3.info("🟢 最佳加碼機會：目前沒有明顯加碼標的")
-
-            if forbidden is not None:
-                c4.error(
-                    f"🔴 禁止加碼：{forbidden['股票']}｜{forbidden['AI總分']}分｜分數低於50"
-                )
-            else:
-                c4.success("🔴 禁止加碼：目前沒有分數低於50的標的")
+        st.caption("買賣股數與資金配置已集中到「💰 持股」，避免同一組建議在不同分頁重複出現。")
     else:
         st.info("目前資料不足，無法產生AI診斷。")
 
@@ -3313,22 +3790,40 @@ with tab_portfolio:
     st.subheader("🎯 AI買賣計畫中心")
     trade_plan_df = v10_trade_plan_table(portfolio, cash_input, ai_score, steel_score, chip_score_map)
     if not trade_plan_df.empty:
-        render_wrapped_table(
-            trade_plan_df,
-            column_widths={
-                "股票": "7%",
-                "AI總分": "7%",
-                "長線建議": "12%",
-                "現價": "7%",
-                "AI燈號": "12%",
-                "加碼區": "10%",
-                "建議加碼": "12%",
-                "減碼區": "10%",
-                "建議減碼": "12%",
-                "位置狀態": "11%",
-            },
-        )
+        def short_action(text):
+            text = str(text)
+            for token in ["：", "，", "；", "。"]:
+                if token in text:
+                    return text.split(token)[0]
+            return text[:18]
 
+        compact_plan_df = pd.DataFrame({
+            "股票": trade_plan_df["股票"],
+            "現價": trade_plan_df["現價"],
+            "AI": trade_plan_df["AI總分"],
+            "位置": trade_plan_df["位置狀態"].astype(str).str.replace("區", "", regex=False),
+            "距加碼": trade_plan_df["距加碼"],
+            "距減碼": trade_plan_df["距減碼"],
+            "策略": trade_plan_df["1年策略"].astype(str).apply(short_action),
+            "加碼": trade_plan_df["加碼建議"].astype(str).apply(short_action),
+            "減碼": trade_plan_df["減碼建議"].astype(str).apply(short_action),
+        })
+        st.dataframe(compact_plan_df, use_container_width=True, hide_index=True, height=230)
+
+        st.caption("完整的美股敏感度、隔夜影響、加減碼理由與觸發條件放在下方展開卡，主表只保留可快速掃描的決策摘要。")
+        for _, row in trade_plan_df.iterrows():
+            with st.expander(f"{row['股票']}｜AI {row['AI總分']}｜{row['位置狀態']}｜加碼 {row['距加碼']} / 減碼 {row['距減碼']}"):
+                c1, c2, c3 = st.columns(3)
+                c1.metric("現價", row["現價"])
+                c2.metric("加碼區", row["加碼區"])
+                c3.metric("減碼區", row["減碼區"])
+                st.markdown(f"**1年策略：** {row['1年策略']}")
+                st.markdown(f"**美股敏感度：** {row['美股敏感度']}")
+                st.markdown(f"**隔夜影響：** {row['隔夜影響']}")
+                st.markdown(f"**加碼建議：** {row['加碼建議']}")
+                st.markdown(f"**減碼建議：** {row['減碼建議']}")
+                st.markdown(f"**觸發條件：** {row['觸發條件']}")
+                st.markdown(f"**理由：** {row['理由']}")
     st.subheader("🧭 投資組合風險儀表板")
     risk_df, ai_pct, steel_pct, risk_label, risk_note = portfolio_risk_dashboard(portfolio)
     rc1, rc2, rc3 = st.columns(3)
@@ -3342,4 +3837,3 @@ with tab_portfolio:
     st.subheader("💵 新資金配置建議")
     allocation_df = allocation_suggestion(cash_input, ai_score, steel_score)
     st.dataframe(allocation_df, use_container_width=True, hide_index=True)
-

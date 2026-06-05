@@ -1,0 +1,18 @@
+# Local/private data
+portfolio.csv
+*.ui-backup
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environment
+.venv/
+venv/
+.env
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
