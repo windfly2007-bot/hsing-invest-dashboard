@@ -50,10 +50,10 @@ commodity_list = {
 }
 
 default_portfolio = {
-    "台積電": {"shares": 70, "cost": 2047.76},
-    "鴻海": {"shares": 200, "cost": 264.72},
-    "廣達": {"shares": 500, "cost": 315.49},
-    "大成鋼": {"shares": 1000, "cost": 42.69},
+    "台積電": {"shares": 0, "cost": 0.0},
+    "鴻海": {"shares": 0, "cost": 0.0},
+    "廣達": {"shares": 0, "cost": 0.0},
+    "大成鋼": {"shares": 0, "cost": 0.0},
 }
 
 long_term_rules = {
